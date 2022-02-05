@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+    <mime-type type="application/x-eagleeye">
+        <comment>Avouch package</comment>
+        <icon name="package-x-generic"/>
+        <alias type="application/x-eagleeye"/>
+        <glob pattern="*.AVHP"/>
+        <glob pattern="*.avhp"/>
+    </mime-type>
+    <mime-type type="application/x-text">
+        <comment>Eagleeye package build file</comment>
+        <icon name="text-x-rpm-spec"/>
+        <alias type="application/x-text"/>
+        <glob pattern="*.AVHB"/>
+        <glob pattern="*.avhb"/>
+    </mime-type>
+</mime-info>

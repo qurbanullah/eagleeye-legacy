@@ -1,0 +1,1908 @@
+#!/bin/bash
+
+# set umask
+# umask 0022
+
+# exit when any command fails
+set -e
+
+BASENAME="$(basename "${0}")"
+PARAMETER=${1}
+EEVER=0.2.0
+MOUNTPOINT="/"
+
+
+# keep track of the last executed command
+trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
+# echo an error message if return code in not zero before exiting
+last_exit_code=$?
+if [ $last_exit_code -ne 0 ];then
+	trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
+fi
+
+# function to exit script when command failed with spsific codes.
+exit_on_error() {
+    exit_code=$1
+    last_command=${@:2}
+    if [ $exit_code -ne 0 ]; then
+        >&2 echo "\"${last_command}\" command failed with exit code ${exit_code}."
+        exit $exit_code
+    fi
+}
+
+die() {
+    echo "$(basename "$0"): $*"
+    exit 1
+}
+
+
+if [[ -f ${2} ]]; then
+    PKGNAME=$(grep -v '^#' "${2}")
+else
+    PKGNAME=${2}
+fi
+
+#TMPDIR="${3}"
+
+cachedir='/var/avouch/ee/cache'
+    if [ ! -d "$cachedir" ]; then
+        mkdir -p "$cachedir"
+    fi
+
+source "/etc/ee.conf"
+
+# initialize varable
+srcdir=''
+
+
+
+########################################################################
+# check if messages are to be printed using color
+unset ALL_OFF BOLD BLUE GREEN RED YELLOW
+
+	if tput setaf 0 &>/dev/null; then
+		ALL_OFF="$(tput sgr0)"
+		BOLD="$(tput bold)"
+		BLUE="${BOLD}$(tput setaf 4)"
+		GREEN="${BOLD}$(tput setaf 2)"
+		RED="${BOLD}$(tput setaf 1)"
+		YELLOW="${BOLD}$(tput setaf 3)"
+	else
+		ALL_OFF="\e[0m"
+		BOLD="\e[1m"
+		BLUE="${BOLD}\e[34m"
+		GREEN="${BOLD}\e[32m"
+		RED="${BOLD}\e[31m"
+		YELLOW="${BOLD}\e[33m"
+	fi
+
+readonly ALL_OFF BOLD BLUE GREEN RED YELLOW
+
+### SUBROUTINES ###
+plain() {
+	local mesg=$1; shift
+	printf "${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
+}
+
+success() {
+	local mesg=$1; shift
+	printf "${GREEN} $(gettext "Success:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
+}
+
+message() {
+	local mesg=$1; shift
+	printf "${BLUE} $(gettext "Message:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
+}
+
+warning() {
+	local mesg=$1; shift
+	printf "${YELLOW} $(gettext "Warning:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
+}
+
+error() {
+	local mesg=$1; shift
+	printf "${RED} $(gettext "Error:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
+}
+
+########################################################################
+usage() {
+	printf "${BASENAME} %s\n" "$EEVER : usage"
+	echo
+	printf -- "$(gettext "CREATE / INSTALL PACKAGES FOR AVOUCH LINUX")\n"
+	echo
+	printf -- "$(gettext "Usage: %s [options]")\n" "$0"
+	echo
+	printf -- "$(gettext "Options:")\n"
+	printf -- "$(gettext "  -h,   --help                   Show this help message and exit")\n"
+	printf -- "$(gettext "  -i,   --install                Install package")\n"
+	printf -- "$(gettext "  -b,   --build                  Build package")\n"
+	printf -- "$(gettext "  -bi,  --build-install          Build and install package")\n"
+	printf -- "$(gettext "  -bl,  --build-list             Build package from a list given in text file")\n"
+	printf -- "$(gettext "  -bli, --build-list-install     Build package from a list given in text file and install built package")\n"
+	echo
+	printf -- "$(gettext "These options can be passed to %s:")\n" "eagleeye"
+	echo
+}
+
+show_usage() {
+    cat <<EOF
+Usage: $program_name [OPTIONS...] <name|directory> [COMMAND [ARGS...]]
+
+  -h                    Show usage information
+  --help                Show full help
+  -r|--as-root          Use superuser inside the spawned root
+  -n|--dry-run          Do not run any privileged commands - only print them
+  -i|--image            An image or Docker container name to run
+  -d|--dir              A directory to spawn or chroot into
+  -u|--user <name>      Assume <name> user inside the container
+  --arch <arch>         Set architecture reported by uname(2)
+  --bind-home <dir>     Bind the specified directory as a user's home directory
+  --bind-dir <dir>      Mount the specified directory inside the root
+  --with-ssh-agent      Pass SSH_AUTH_SOCK variable and bind the socket
+  --with-x11            Pass DISPLAY, XAUTHORITY and bind $xsock_dir
+  --with-pulseaudio     Set PULSE_SERVER and pass Pulseaudio socket
+  --to-stderr           Redirect all container command output to stderr
+  --share-devices       Share devices with the host
+  --using-docker        Use Docker to spawn the named container
+  --using-nspawn        Use 'systemd-nspawn' to chroot
+  --using-chroot        Use the regular 'chroot'
+  --unlock              Remove the lock file
+  --cleanup             Release stale mount points and unlock
+
+EOF
+}
+
+show_help() {
+    cat <<EOF
+Usage: $program_name [OPTIONS...] <name|directory> [COMMAND [ARGS...]]
+
+  Spawns a new container or chroot and configures a shared environment.
+
+OPTIONS
+
+  -h                    Show usage information
+  --help                Show full help
+  -r|--as-root          Use superuser inside the spawned root
+  -n|--dry-run          Do not run any privileged commands - only print them
+  -i|--image            An image or Docker container name to run
+  -d|--dir              A directory to spawn or chroot into
+  -u|--user <name>      Assume <name> user inside the container
+  --arch <arch>         Set architecture reported by uname(2)
+  --bind-home <dir>     Bind the specified directory as a user's home directory
+  --bind-dir <dir>      Mount the specified directory inside the root
+  --with-ssh-agent      Pass SSH_AUTH_SOCK variable and bind the socket
+  --with-x11            Pass DISPLAY, XAUTHORITY and bind $xsock_dir
+  --with-pulseaudio     Set PULSE_SERVER and pass Pulseaudio socket
+  --to-stderr           Redirect all container command output to stderr
+  --share-devices       Share devices with the host
+  --using-docker        Use Docker to spawn the named container
+  --using-nspawn        Use 'systemd-nspawn' to chroot
+  --using-chroot        Use the regular 'chroot'
+  --unlock              Remove the lock file
+  --cleanup             Release stale mount points and unlock
+
+SYNOPSIS
+
+  The 'spawn' script runs the named Docker container or spawns/chroots into the
+  specified directory. If neither '--image' nor '--dir' option is provided then
+  the first non-option argument which is not a parameter to some other option
+  is assumed to specify what to spawn. If it points to an existing directory
+  then the script assumes you want to chroot/nspawn and run a container
+  otherwise. Use the '--' to explicitly mark the end of spawn's arguments.
+
+  If the next argument after the name or '--' does not start with a '-' it,
+  along with the remaining command line will be passed to the spawned
+  environment as the command to run. Otherwise, if the next argument after the
+  name or '--' does start with a '-' it and the rest will be passed as options
+  to the underlying driver (docker run / systemd-nspawn). Use the '--' to
+  separate the arguments from the command in this case. The argument list could
+  be empty, use the '--' immediately after the name to pass the command
+  starting with '-' directly to the spawned environment (e.g. to container's
+  entrypoint script).
+
+  Specifying an '--image' option requests to spawn a Docker container,
+  specifying a '--dir' option requests to spawn chroot using the systemd-nspawn
+  if it is found or using chroot command otherwise. Specifying '--using-*'
+  option overrides any other heuristic for determining spawn type including the
+  existence of the '--image', '--dir' or checking for an existing directory.
+
+  If no user is specified the script will attempt to map the current user to
+  the spawned environment. In the case of root directory it will find out the
+  user info from root's /etc/passwd but in the case of containers it will not
+  be able to guess the username, so if it differs from the local username it is
+  necessary to set it explicitly.
+
+  Use the '--bind-home' option to mount the specified directory as a user's home
+  directory inside the chroot. For example, if you run:
+
+      spawn --bind-home $HOME/somedir root
+
+  The directory '$HOME/somedir' will become '/home/dev' inside the spawned
+  chroot (assuming the default 'dev' user is not overridden). Use this to have a
+  separate clean profile and settings from the host or to share the same home
+  directory between different chrooted environments.
+
+  Use the '--bind-dir' option to mount the specified directory inside the chroot
+  at the same path as outside. Run build commands relative to this directory to
+  have compile_commands.json generated with the absolute paths directly usable
+  by editor and language servers outside of the chrooted environment. After
+  spawning the chroot it will be the current working directory and also
+  available as '\$WD' in the environment. It can be the same directory which is
+  specified for '--bind-home'.
+
+  Use the '--unlock' option to remove stale lock files from the root directory
+  after an unexpected system shutdown, for example.
+
+  The '--cleanup' option can be used to unmount the directories left by other
+  spawn invocations.
+
+  If either '--unlock' or '--cleanup' is specified all other options are
+  ignored, the script exits immediately after the cleanup.
+
+NOTE
+
+  If you get "Connection failure: Protocol error" error or silent audio when
+  trying to run PulseAudio applications inside the chroot, you need to disable
+  communication through shared memory for the client. Add:
+
+    enable-shm = no
+
+  to "/etc/pulse/client.conf" inside the root directory.
+
+EOF
+}
+
+########################################################################
+[[ -z "${1}" ]] && usage
+
+
+# change to english locale!
+export LANG="en_US"
+
+while [ $# -gt 0 ]; do
+	case ${1} in
+		-i|--install) INSTALL="1" ;;
+		-b|--build) BUILD="1" ;;
+		-bi|--build-install) BUILD="1" INSTALL="1" ;;
+		-bl|--build-list) BUILD="1" LIST="1" ;;
+		-bli|--build-install-install) BUILD="1" LIST="1" INSTALL="1" ;;
+		update|--update) UPDATEDB="1" ;;
+		-h|--help|?) usage ;;
+		esac
+	shift
+done
+
+#printf "$(gettext "INSTALL = $INSTALL")\n"
+#printf "$(gettext "BUILD = $BUILD")\n"
+#printf "$(gettext "LIST = $LIST")\n"
+########################################################################
+# Check wether tempdir exists or not
+	#if [ $# -ne 1 ]; then
+	#	info "Usage: $0 {parameter such as -i for installation}"
+		#exit 1
+	#fi
+########################################################################
+
+# Check wether tempdir exists or not
+#if [ $# -ne 3 ]
+#then
+#	info "Usage: $0 {dir-name}"
+	#exit 1
+#fi
+
+
+#if [ ! -d "$TMPDIR" ]; then
+	#info "$TMPDIR Temporary directory not found! Creating TMPDIR"
+#	TMPDIR=$(mktemp -d)	
+#fi
+
+# hack for the tmp dir as QT or polkit sets its permisssion to 'drwx------' of temp folder only.
+# while we want the permission of 'drwxr-xr-x'
+# othervise it will crash the system
+#chmod 755 "${TMPDIR}"
+
+#if [[ ${TMPDIR}=="" ]]; then
+#	TMPDIR=$(mktemp -d)
+
+#fi
+########################################################################
+### check for root
+check_root () {
+	if test "x`id -u`" != "x0"; then
+		#echo "Root privileges are required for installing packages."
+		error "$(gettext "Root privileges are required for installing packages. Try sudo!")"
+		exit 1
+	fi
+}
+
+#echo "check for root"
+#check_root
+
+########################################################################
+
+# exit on failed command and display an error message
+# PROGNAME holdes the command being execued taken from the 
+# first environmental variable i.e. $0
+
+die(){
+	PROGNAME=$(basename $0)
+	echo "${PROGNAME}: ${1:-"Unknown Error"}" 1>&2
+	exit 1
+}
+
+########################################################################
+# determine whether we have gettext; make it a no-op if we do not
+if ! type -p gettext >/dev/null; then
+	gettext() {
+		printf "%s\n" "$@"
+	}
+fi
+
+#contains="${@:7}"
+#if [[ ${pkgname} != lib32-* ]]; then
+#	BUILD="${CARCH}-avouch-linux-gnu"
+#else
+	# multilib build
+#	BUILD="i686-avouch-linux-gnu"
+#fi	
+#BUILD="i686-avouch-linux-gnu"
+pkgdate="$(date)"
+#avhpkg="${pkgname}-${pkgver}-${pkgrel}-${AVHVER}-${CARCH}"
+DATE=$( date +%Y-%m-%d )
+TIME=$( date +%H:%M )
+TIMEZONE="$(date +%Z)"
+
+## make flags
+#MAKEFLAGS="-j $(grep --count processor /proc/cpuinfo)"
+MAKEFLAGS="${MAKEFLAGS} -j$(nproc)"
+
+
+
+########################################################################
+exit_on_error() {
+    exit_code=$1
+    last_command=${@:2}
+    if [ $exit_code -ne 0 ]; then
+        >&2 echo "\"${last_command}\" command failed with exit code ${exit_code}."
+        exit $exit_code
+    fi
+}
+
+command_exists () {
+    command -v "$1" >/dev/null 2>&1
+}
+
+build_tools_exists () {
+    if command_exists "gcc"; then
+        message "Found usable gcc compiler!"
+    else
+        message "Your system does not have usable gcc compiler"
+        exit 1
+    fi
+    if command_exists "make"; then
+        message "make utility exists!"
+    else
+        message "Your system does not have make utility"
+        exit 1
+    fi
+
+}
+
+disable_ld_gold(){
+	message "Using linker ld.bfd instead of ld.gold"
+	# test wether the gold is the default linker
+	# TODO
+	local test_for_gold_linker=$(/usr/bin/ld --version | grep "GNU gold")
+	if [ -z "${test_for_gold_linker}" ]; then
+		message "Gold linker is already disabled"
+	else
+		rm /usr/bin/ld
+		ln -svf ld.bfd /usr/bin/ld
+	fi
+}
+
+enable_ld_gold(){
+	message "Enabling Gold linker"
+	# test wether the gold is the default linker
+	# TODO
+	local test_for_gold_linker=$(/usr/bin/ld --version | grep "GNU ld")
+	if [ -z "${test_for_gold_linker}" ]; then
+		message "Gold linker is already enabled"
+	else
+		rm /usr/bin/ld
+		ln -svf ld.gold /usr/bin/ld
+	fi
+}
+
+enter_chroot_env(){
+	systemd-nspawn -D "${MOUNTPOINT}" -- /bin/sh -c "exec $(get_command)"
+}
+
+## select the directory to install package
+#pkgdir=`mktemp -d`
+copy_srcbundledir(){
+    # unset all pkgname variable
+    message "Unsetting the variables"
+    unset _tarname
+    unset _pkgname
+    unset _realname
+    unset _pkgbasename
+    unset pkgbase
+    unset pkgname
+    
+    if [ ! -d "${builddir}" ]; then
+        mkdir -p "${builddir}"
+    fi
+    # local srcbundle=( $( find "${srcbundledir}/${1}" -type d -print ))
+    local srcbundle=( $( find ${srcbundledir} -type d | grep "${1}" | sed -e 's/\.\///'))
+    
+    for dir in ${srcbundle[@]};do
+        # message "$(gettext "Package is : $dir")"
+        # remove all text before slashes and compare it with called package.
+        # if true copy the srcbundle directory else continue.
+        if [[ $( echo $dir | sed 's/.*\///') == ${1} ]]; then
+            message "$(gettext "Package source found at : $dir")"
+            cp -a "${dir}" "${builddir}/"
+            break
+        fi        
+    done
+        
+    srcbuilddir="${builddir}/${1}"        
+
+    # check for source directory
+    if [ -f "$srcdir/${1}.avhb" ]; then
+        message "Source directory is : ${srcdir}"
+        source "$srcdir/${1}.avhb" 
+    else
+        error "${srcdir}: ${1}.avhb file not found."
+        exit 1
+    fi
+         
+	#srcdir="$(find . -path d -name "/build/${package}")"
+	message "pkgdir directory is ${pkgdir}"
+
+	# create empety build.log file
+    touch "${builddir}/${1}/build.log" 
+
+
+    
+    #local srcbundle=( $( find "${srcbundledir}/core/pkgbuild${PKGNAME}" -type d -print ))
+    #echo "directory is : $srcbundle"
+    #if [[ -d $( find "${srcbundledir}/core/pkgbuild/${PKGNAME}" -type d -print ) ]]; then
+    #    cp -a "${srcbundledir}/core/pkgbuild/${PKGNAME}" "${builddir}"
+    #elif [[ -d $( find "${srcbundledir}/extra/pkgbuild/${PKGNAME}" -type d -print ) ]]; then
+    #    cp -a "${srcbundledir}/core/pkgbuild/${PKGNAME}" "${builddir}"
+    #elif [[ -d $( find "${srcbundledir}/multilib/pkgbuild/${PKGNAME}" -type d -print ) ]]; then
+    #    cp -a "${srcbundledir}/multilib/pkgbuild/${PKGNAME}" "${builddir}"
+    #else
+     #   message "$(gettext "${PKGNAME} : No such package")"
+     #   exit 1
+    #fi
+}
+#copy_srcbundledir
+
+
+function_exists(){
+	
+    FUNCTION_NAME=${1}
+
+    [ -z "$FUNCTION_NAME" ] && return 1
+
+    declare -F "$FUNCTION_NAME" > /dev/null 2>&1
+
+    return $?
+}
+########################################################################
+
+##
+# Checks to see if options are present in ee.conf or .avhb;
+# .avhb options always take precedence.
+#
+#  usage : check_option( $option, $expected_val )
+# return : 0   - matches expected
+#          1   - does not match expected
+#          127 - not found
+##
+check_option() {
+	check_item_in_options_array "$1" ${options[@]}
+	case $? in
+		0) # assert enabled
+			[[ $2 = y ]]
+			return ;;
+		1) # assert disabled
+			[[ $2 = n ]]
+			return ;;
+	esac
+
+	# fall back to makepkg.conf options
+	check_item_in_options_array "$1" ${OPTIONS[@]}
+	case $? in
+		0) # assert enabled
+			[[ $2 = y ]]
+			return ;;
+		1) # assert disabled
+			[[ $2 = n ]]
+			return ;;
+	esac
+
+	# not found
+	return 127
+}
+
+
+##
+# Check if option is present in BUILDENV
+#
+#  usage : check_buildenv( $option, $expected_val )
+# return : 0   - matches expected
+#          1   - does not match expected
+#          127 - not found
+##
+check_buildenv() {
+	check_item_in_options_array "$1" ${BUILDENV[@]}
+	case $? in
+		0) # assert enabled
+			[[ $2 = "y" ]]
+			return ;;
+		1) # assert disabled
+			[[ $2 = "n" ]]
+			return ;;
+	esac
+
+	# not found
+	return 127
+}
+
+
+##
+#  usage : check_item_in_options_array( $needle, $haystack )
+# return : 0   - enabled
+#          1   - disabled
+#          127 - not found
+##
+check_item_in_options_array() {	
+	local needle=$1; shift
+	local i opt
+	for (( i = $#; i > 0; i-- )); do
+		opt=${!i}
+		if [[ $opt = "$needle" ]]; then
+			# enabled
+			#echo "enabled"
+			return 0
+		elif [[ $opt = "!$needle" ]]; then
+			# disabled
+			#echo "disabled"
+			return 1
+		fi
+	done
+
+	# not found
+	return 127
+}
+
+##
+#  usage : in_array( $needle, $haystack )
+# return : 0 - found
+#          1 - not found
+##
+check_item_in_array() {
+	local needle=$1; shift
+	local item
+	for item in "$@"; do
+		[[ $item = "$needle" ]] && return 0 # Found
+	done
+	return 1 # Not Found
+}
+
+
+updatePackageDatabase(){
+    if [ ! -d "$PKGDBDIR" ]; then
+        mkdir -p "$PKGDBDIR"
+    fi
+    if [ -f "$PKGDB" ]; then		
+		# find all the files in database table files and then filter out
+		# the first line nombers and | with sed
+		local today="$(date +%Y%m%d)"		
+		local date_created="$(grep -oPm1 "(?<=<Date>)[^<]+" "$PKGDB")"
+		#message "$(gettext "Date created is : $date_created")"
+		echo "date difference is : $(( ${today} - ${date_created} ))"
+		if [ "$(( ${today} - ${date_created} ))" -gt "1" ]; then
+			curl "${INFOURL}/pkgdb.xml" -o "$PKGDB"
+		else
+			message "$(gettext "Database is uptodate")"
+		fi
+	else
+		message "$(gettext "Updating Avouch packages database...")"
+        curl "${INFOURL}/pkgdb.xml" -o "$PKGDB"
+    fi
+	if [ -f "$PKGNAMEDB" ]; then		
+		# find all the files in database table files and then filter out
+		# the first line nombers and | with sed
+		local today="$(date +%Y%m%d)"		
+		local date_created="$(grep -oPm1 "(?<=<Date>)[^<]+" "$PKGNAMEDB")"
+		#message "$(gettext "Date created is : $date_created")"
+		echo "date difference is : $(( ${today} - ${date_created} ))"
+		if [ "$(( ${today} - ${date_created} ))" -gt "1" ]; then
+			curl "${INFOURL}/pkgdb.xml" -o "$PKGNAMEDB"
+		else
+			message "$(gettext "Database is uptodate")"
+		fi
+	else
+		message "$(gettext "Updating Avouch packages database...")"
+        curl "${INFOURL}/pkgnamedb.xml" -o "$PKGNAMEDB"
+    fi
+	success "$(gettext "Avouch Packages Database updated successfully")"
+}
+
+########################################################################
+
+download_repo_db(){
+    if [ ! -d "$PKGDBDIR" ]; then
+        mkdir -p "$PKGDBDIR"
+    fi
+    if [ -f "$PKGDB" ]; then		
+		# find all the files in database table files and then filter out
+		# the first line nombers and | with sed
+		local today="$(date +%Y%m%d)"		
+		local date_created="$(grep -oPm1 "(?<=<Date>)[^<]+" "$PKGDB")"
+		# echo "Date created is $date_created"
+		#message "$(gettext "Date created is : $date_created")"
+		# echo "date difference is : $(( ${today} - ${date_created} ))"
+		if [ "$(( ${today} - ${date_created} ))" -gt "7" ]; then
+			curl "${INFOURL}/pkgdb.xml" -o "$PKGDB"
+		else
+			message "$(gettext "Database is uptodate")"
+		fi
+	else
+        curl "${INFOURL}/pkgdb.xml" -o "$PKGDB"
+    fi
+    if [ ! -f "$PKGNAMEDB" ]; then
+		message "$(gettext "Avouch packages database is too old, updating database...")"
+        curl "${INFOURL}/pkgnamedb.xml" -o "$PKGNAMEDB"
+    fi
+}
+
+extract_pkg(){	
+	if [ ! -d "$TMPDIR" ]; then
+		#info "$TMPDIR Temporary directory not found! Creating TMPDIR"
+		TMPDIR=$(mktemp -d)	
+	fi
+
+	# hack for the tmp dir as QT or polkit sets its permisssion to 'drwx------' of temp folder only.
+	# while we want the permission of 'drwxr-xr-x'
+	# othervise it will crash the system
+	chmod 755 "${TMPDIR}"
+
+	# go to root directory	
+	#echo "tmpdir is ${TMPDIR}"
+	pushd "/var/avouch/ee/cache"
+	#info "$(gettext "Package is : ${1}")"
+		# extract package
+		tar -Jxf "${1}" -C "${TMPDIR}" || exit 1 
+		#cp -f "${TMPDIR}"/.PKGINFO "${PKGINFODIR}"
+	popd
+}
+########################################################################
+verify_url() {
+    #info "$(gettext "Url to veryfiy is : ${1}")"
+    #local verification=( curl -f "${1}" >/dev/null 2>&1)
+    #info "$(gettext "Package to download is : ${1}")"   
+    curl -f "${1}" >/dev/null 2>&1
+    if [[ $? == 0 ]]; then
+        message "$(gettext "Package exists online")"        
+    else
+        message "$(gettext "Package does not exist online")"  
+        exit 1
+    fi
+}
+
+download_pkg() {
+	#info "$(gettext "Downloading package : ${URL}/${AVHVER}/packages/${ARCH}/${1}")"	   
+    verify_url "${PKGDLURL}${1}"
+	# echo "Package URL is : ${PKGDLURL}${1}"
+    message "$(gettext "Downloading package...")"  
+    #curl --progress-bar "${DLURL}/${1}" -o "${cachedir}/${1}"
+	curl  --progress-bar "${PKGDLURL}${1}" -o "${cachedir}/${1}"
+	extract_pkg "${1}"
+}
+
+########################################################################
+download_pkg_db(){
+    #info "$(gettext "Downloading package database: https://packages.avouch.org/al01/pkginfo/${1}")"
+    verify_url "${INFOURL}/${1}"
+    message "$(gettext "Downloading package database...")"  
+    curl  --progress-bar "${INFOURL}/${1}" -o "${cachedir}/${1}"	
+}
+
+########################################################################
+get_pkg_info(){
+    if [ ! -d "${cachedir}" ]; then
+        mkdir -p "${cachedir}"
+    fi
+    local pkg_db="${1}.xml"
+        
+    if [ ! -f "${cachedir}/${1}.xml" ]; then
+        download_pkg_db "${pkg_db}"
+    fi
+
+    #if [ -f "/usr/bin/xpath" ]; then	
+	if [ -f "/usr/bin/grep" ]; then	
+        # find all the files in database table files and then filter out
+        # the first line nombers and | with sed			
+        #local pkg_name=( $(xpath -q -e '/Package/Name' ${cachedir}/${pkg_db} | sed 's/<Name>//' | sed 's/<\/Name>//'))
+		local pkg_name="$(grep -oPm1 "(?<=<Name>)[^<]+" "${cachedir}/${pkg_db}")"	
+        #message "$(gettext "Package name is : $pkg_name")"
+        
+        #local pkg_ver=( $(xpath -q -e '/Package/Version' ${cachedir}/${pkg_db} | sed 's/<Version>//' | sed 's/<\/Version>//'))	
+        local pkg_ver="$(grep -oPm1 "(?<=<Version>)[^<]+" "${cachedir}/${pkg_db}")"	
+		message "$(gettext "Package version is : $pkg_ver")"
+
+        #local pkg_rel=( $(xpath -q -e '/Package/Release' ${cachedir}/${pkg_db} | sed 's/<Release>//' | sed 's/<\/Release>//'))	
+        local pkg_rel="$(grep -oPm1 "(?<=<Release>)[^<]+" "${cachedir}/${pkg_db}")"	
+		#message "$(gettext "Package Release is : $pkg_rel")"
+
+        #local pkg_AVHVER=( $(xpath -q -e '/Package/Distribution' ${cachedir}/${pkg_db} | sed 's/<Distribution>//' | sed 's/<\/Distribution>//'))	
+        local pkg_AVHVER="$(grep -oPm1 "(?<=<Distribution>)[^<]+" "${cachedir}/${pkg_db}")"	
+		#message "$(gettext "Package Avouch version is : $pkg_AVHVER")"
+        
+        #local pkg_arch=( $(xpath -q -e '/Package/Architecture' ${cachedir}/${pkg_db} | sed 's/<Architecture>//' | sed 's/<\/Architecture>//'))	
+        local pkg_arch="$(grep -oPm1 "(?<=<Architecture>)[^<]+" "${cachedir}/${pkg_db}")"	
+		#message "$(gettext "Package Compiler Architecture is : $pkg_arch")"
+    else
+        #echo "$(gettext "xpath not found...")"
+		echo "$(gettext "grep not found...")"
+        exit 1
+    fi  
+    if [[ "x${AVHVER}" != "x$pkg_AVHVER" ]]; then
+        message "$(gettext "Package is not for the Avouch $AVHVER")"
+        exit 1
+    else 
+        local pkg_to_download="$pkg_name-$pkg_ver-$pkg_rel-$pkg_AVHVER-$pkg_arch.avhp"
+        #info "$(gettext "Package to download is : $pkg_to_download")"
+        #info "$(gettext "Package is : $pkg_to_download")"
+        download_pkg "$pkg_to_download"
+    fi
+}
+
+########################################################################
+verify_package_exist(){
+    # angle brackets are used to hack the exact match
+    local result_find_package=( $(grep -e "<Name>${1}</Name>" "$PKGNAMEDB") )
+    pushd /usr/share/avouch/pkginfo
+        local result_package_already_installed=( $( find  -L -type f -name "${1}.xml" | sed 's/^..//' |  sort -n) )
+    popd
+    
+    #echo "$search_result"
+ #echo "$search_result"
+    if [[ "$result_package_already_installed" == "${1}.xml" ]]; then
+        message "$(gettext "Package ${1} already installed")"
+        exit 1
+    else
+        message "$(gettext "Package ${1} not installed")"
+    fi 
+   
+   #echo "$search_result"
+    if [[ "$result_find_package" == "<Name>${1}</Name>" ]]; then
+        message "$(gettext "Package ${1} available and will be installed")"
+        get_pkg_info ${1}
+    else
+        error "$(gettext "Package ${1} not available yet")"
+        exit 1
+    fi 
+}
+
+
+########################################################################
+cleanup(){
+	# remove eagleEye spesific temporary directory
+	rm -rf /usr/share/avouch/temp
+	rm -rf "${TMPDIR}"
+}
+
+########################################################################
+post(){	
+	
+	if [ -f "${TMPDIR}/usr/share/avouch/temp/INSTAL" ]; then
+		source "${TMPDIR}/usr/share/avouch/temp/INSTAL"	
+		if ( function_exists 'post_install' );then
+			# run function prepare() from INSTALL file		
+			#prepare 2>&1 | tee -a "${srcdir}/build.log"
+			pushd "/"
+				post_install
+			popd
+		else
+			message "$(gettext "Post installation script not specified")"			
+		fi	
+	else 
+		message "$(gettext "Post installation script not required")"
+	fi
+	
+	cleanup	
+}
+
+extract_file(){
+	
+	local srcarchivefile=''
+	local file_to_extract=''
+	local file=''
+	local ext=''
+	local cmd=''
+	
+	# Extract the source archive		
+		if [ -n "${_tarname}" ]; then
+			srcarchivefile=( $( find "${srcarchivedir}/${_tarname}-${pkgver}"* -type f -print || true ))
+			if [ -z $srcarchivefile ]; then
+				srcarchivefile=( $( find "${srcarchivedir}/${_tarname}"* -type f -print ))
+			fi
+        elif [ -n "${_pkgname}" ]; then
+			srcarchivefile=( $( find "${srcarchivedir}/${_pkgname}-${pkgver}"* -type f -print || true ))
+			if [ -z $srcarchivefile ]; then
+				srcarchivefile=( $( find "${srcarchivedir}/${_pkgname}"* -type f -print ))
+			fi
+		elif [ -n "${_realname}" ]; then
+			srcarchivefile=( $( find "${srcarchivedir}/${_realname}-${pkgver}"* -type f -print || true ))
+			if [ -z $srcarchivefile ]; then
+				srcarchivefile=( $( find "${srcarchivedir}/${_realname}"* -type f -print ))
+			fi
+		elif [ -n "${_pkgbasename}" ]; then
+			srcarchivefile=( $( find "${srcarchivedir}/${_pkgbasename}-${pkgver}"* -type f -print ))
+			if [ -z $srcarchivefile ]; then
+				srcarchivefile=( $( find "${srcarchivedir}/${_pkgbasename}"* -type f -print ))
+			fi
+		elif [ -n "${pkgbase}" ]; then
+			srcarchivefile=( $( find "${srcarchivedir}/${pkgbase}-${pkgver}"* -type f -print || true ))
+			if [ -z $srcarchivefile ]; then
+				srcarchivefile=( $( find "${srcarchivedir}/${pkgbase}"* -type f -print ))
+			fi
+		elif [ -n "${pkgname}" ]; then
+			# continue executing if file not found
+			srcarchivefile=( $( find "${srcarchivedir}/${pkgname}-${pkgver}"* -type f -print || true ))
+			if [ -z $srcarchivefile ]; then
+				srcarchivefile=( $( find "${srcarchivedir}/${pkgname}"* -type f -print ))
+			fi
+		else 
+			message "$(gettext "File not found")"
+		fi
+
+		#message "$(gettext "File found is : $srcarchivefile")"
+		
+		if [ ! -z $srcarchivefile ]; then
+			for file_to_extract in ${srcarchivefile[@]};do
+				# copy file to the builddir
+				message "$(gettext "File ${file_to_extract} found")"
+				cp "${file_to_extract}" .
+			done		
+		else
+			message "$(gettext "File does not exists")"
+			return 0
+		fi
+		
+		# A temporary workaround
+		# In case more than one file found then run for loop and extract each file
+		# The source directory defined in PKGBUILD wins
+		# TODO : find the exact file ???
+		for file_to_extract in ${srcarchivefile[@]};do
+						
+			file="${file_to_extract##*/}"
+			
+			# do not rely on extension for file type
+			file_type=( $(file -biL ${file_to_extract} ))
+			ext=${file##*.}	
+			
+			case "$file_type" in
+				*application/x-tar*|*application/zip*|*application/x-zip*|*application/x-cpio*)
+					cmd="bsdtar" ;;
+				*application/x-gzip*)
+					case "$ext" in
+						tgz|gz|z|Z) cmd="gzip" ;;
+						*) return;;
+					esac ;;
+				*application/x-bzip*)
+					case "$ext" in
+						bz2|bz) cmd="bzip2" ;;
+						*) return;;
+					esac ;;
+				*application/x-xz*)
+					case "$ext" in
+						xz) cmd="xz" ;;
+						*) return;;
+					esac ;;
+					*application/x-zip*)
+					case "$ext" in
+						zip) cmd="unzip" ;;
+						*) return;;
+					esac ;;
+					*application/x-run*)
+					case "$ext" in
+						run) cmd="sh" ;;
+						*) return;;
+					esac ;;
+				*);;
+			esac
+			message "$(gettext "Extracting %s with %s")" "$file" "$cmd"	
+			local ret=0	
+			if [ -f "${file}" ]; then				
+				# See if bsdtar can recognize the file
+				if bsdtar -tf "${file}" -q '*' &>/dev/null; then
+					cmd="bsdtar"				
+					$cmd -xf "$file" || ret=$?
+				elif [ "$ext"=="run" ]; then
+					sh "${file%.*}" --extract-only  || ret=$?
+				else
+					rm -f -- "${file%.*}"
+					$cmd -dcf "$file" > "${file%.*}" || ret=$?
+				fi
+			fi
+			if [ ! $ret==0 ]; then
+				error "$(gettext "Failed to extract %s")" "$file"
+				error "$(gettext "Aborting...")"
+				exit 1
+			fi
+	done	
+	}
+	
+clean_pkgdir(){
+	
+	if [ -d "${pkgdir}" ]; then
+		pushd "${pkgdir}"
+		
+			# remove all the directories in pkgdir
+			local directories=( $( ls -d * ) )
+			for dir in ${directories[@]};do								
+					rm -rf ${dir}
+			done
+			# remove all the files in pkgdir
+			local files=( $( ls -A ) )
+			for file in ${files[@]};do								
+					rm -rf ${file}
+			done
+			
+		popd			
+	else 
+		
+		message "$(gettext "pkgdir directory does not exist.")"	
+	fi
+	
+}
+	
+clean_srcdir(){	
+
+	pushd "${srcdir}"
+		rm -rf "${pkgname}-${pkgver}"
+		
+		if [ -d "${pkgname}-${pkgver}" ]; then			
+			rm -rf "${pkgname}-${pkgver}"
+			
+		elif [ -d "${_pkgname}-${pkgver}" ]; then
+			rm -rf "${_pkgname}-${pkgver}"		
+					
+		elif [ -d "${pkgname}-${_pkgver}" ]; then
+			rm -rf "${pkgname}-${_pkgver}"
+			
+		elif [ -d "${_realname}-${pkgver}" ]; then
+			rm -rf "${_realname}-${pkgver}"
+		
+		fi	
+	popd
+}
+
+extract_source(){
+	
+	# check for root
+	check_root	
+	
+	if "${fileext}"=="xz"; then 
+		bsdtar -xf "${file}" || exit 1
+		message "$(gettext "Source file extracted")"
+		
+	elif	"${fileext}"=="gz"; then 
+		bsdtar -xf "${file}" || exit 1
+		message "$(gettext "Source file extracted")"
+
+	elif	"${fileext}"=="bzip2"; then 
+		bsdtar -xf "${file}" || exit 1
+		message "$(gettext "Source file extracted")"
+	
+	elif	"${fileext}"=="zip"; then 
+		bsdtar -xf "${file}" || exit 1
+		message "$(gettext "Source file extracted")"
+	fi
+	
+	}
+	
+function_status(){	
+	local retval=$1	
+	if [[ ${retval} != 0 ]]; then	
+		error "$(gettext "The build process failed. Return code is : $retval")"
+		
+		# Add failed entry to pkknameandver.log
+		touch "${builddir}/pkgnameandver.log"
+		echo "# This package failed to build" >> "${builddir}/pkgnameandver.log"
+		
+		touch "${builddir}/pkgname.log"
+		echo "# This package failed to build" >> "${builddir}/pkkname.log"	
+		exit 1
+	else	
+		success "$(gettext "Build process completed successfully")"	
+	fi
+}
+
+build_log() {
+	if [ -f "${srcdir}/build.log" ]; then
+			rm -f "${srcdir}/build.log"
+			touch "${srcdir}/build.log"
+	else
+			touch "${srcdir}/build.log"
+	fi
+	tee -a "${srcdir}/build.log"	
+}
+
+cleanpkg(){
+	# remove libtool specific .la files		
+	find "${pkgdir}" -type f -name '*.la' -delete
+	# remove perls pesific unneded files		
+	find "${pkgdir}" -type f -name '.packlist' -delete
+	find "${pkgdir}" -type f -name '*.pod' -delete	
+}
+
+strip_files(){	
+	if check_option "strip" "y"; then
+		message "$(gettext "Stripping debugging informations...")"
+		
+		# make sure library stripping variables are defined to prevent excess stripping
+		# Remove all debugging symbols & sections
+		#[[ -z ${STRIP_SHARED+x} ]] && STRIP_SHARED="-S"
+		#[[ -z ${STRIP_STATIC+x} ]] && STRIP_STATIC="-S"
+		# Remove all symbol and relocation information
+		#[[ -z ${STRIP_BINARIES+x} ]] && STRIP_BINARIES="-s"
+
+		find "${pkgdir}" -type f -name '*.so' -exec strip "${STRIP_SHARED}" {} \;
+		find "${pkgdir}" -type f -name '*.so.*' -exec strip "${STRIP_SHARED}" {} \;
+		find "${pkgdir}" -type f -name '*.a' -exec strip "${STRIP_STATIC}" {} \;
+		find "${pkgdir}" -type f -executable  -exec strip "${STRIP_BINARIES}" {} \;	
+	else
+		message "$(gettext "Not stripping debugging informations...")"
+	fi
+
+}
+
+# gzip info files
+
+compress_info_files(){
+	# compress the info files with gzip
+	find "${pkgdir}" -type f \( -name "*.info" -o -name "*.info*" \) -exec gzip -9 {} \;
+	# delete the usr/share/indo/dir file
+	find "${pkgdir}" -name 'dir' -delete
+
+}
+
+get_file_contents() {	
+    echo "$(cat ${1})" 
+}
+
+pkginfo_xml() {
+    local _pkgname="${1}"
+    install -m755 -d "${pkgdir}/usr/share/avouch/pkginfo"
+    install -m755 -d "${pkgdir}/usr/share/avouch/scripts"
+
+    message "$(gettext "Creating package xml database...")"
+    touch "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    
+    # Start the XML document
+    echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    # Root of the XML document
+    echo "<Package>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <BaseName>$pkgbase</BaseName>">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <Name>$_pkgname</Name>">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <Version>$pkgver</Version>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <Release>$pkgrel</Release>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <Distribution>$AVHVER</Distribution>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <Architecture>$CARCH</Architecture>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <Description>$pkgdesc</Description>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <SourceUrl>$url</SourceUrl>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <PackageUrl>https://packages.avouch.org/${groups}/${_pkgname}</PackageUrl>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    for lice in "${license[@]}"; do
+        echo "  <License>$lice</License>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    echo "  <DateCreated>${DATE} ${TIME} ${TIMEZONE}</DateCreated>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <Provides>${provides}</Provides>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <Conflicts>${conflicts}</Conflicts>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    for group in "${groups[@]}"; do
+        echo "  <Groups>$group</Groups>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for rep in "${repo[@]}"; do
+        echo "  <Repository>$rep</Repository>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for dep in "${depends[@]}"; do
+        echo "  <Dependancies>$dep</Dependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"	
+    done
+    for optdep in "${optdepends[@]}"; do
+        local optdeps=($(echo -e "$optdep" | sed 's/ :.*//g' | sed 's/://'))
+        echo "  <OptionalDependancies>$optdeps</OptionalDependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for makedep in "${makedepends[@]}"; do
+        echo "  <MakeDependancies>$makedep</MakeDependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for checkdep in "${checkdepends[@]}"; do
+        echo "  <CheckDependancies>$checkdep</CheckDependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for reqby in "${requiredby[@]}"; do
+        echo "  <RequiredBy>$reqby</RequiredBy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for optreqby in "${optrequiredby[@]}"; do
+        echo "  <OptionalRequiredBy>$optreqby</OptionalRequiredBy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for mkreqby in "${makerequiredby[@]}"; do
+        echo "  <MakeRequiredBy>$mkreqby</MakeRequiredBy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for chkreqby in "${checkrequiredby[@]}"; do
+        echo "  <CheckRequiredBy>$chkreqby</CheckRequiredBy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    
+    # Insert maintainer and contributors information to xml database
+	if [ ! -z ${pkgbase} ]; then
+		local maintainers="$( grep Maintainer ${srcdir}/${pkgbase}.avhb | sed 's/# Maintainer: //' | sed 's/ <.*//g')"
+		for maint in "${maintainers[@]}"; do
+			echo "  <Maintainers>$maint</Maintainers>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		done
+		local contributors="$( grep Contributor ${srcdir}/${pkgbase}.avhb | sed 's/# Contributor: //' | sed 's/ <.*//g')"
+		for contrib in "${contributors[@]}"; do
+			echo "  <Contributors>$contrib</Contributors>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		done
+	elif [ -n ${pkgname} ]; then		
+		local maintainers="$( grep Maintainer ${srcdir}/${_pkgname}.avhb | sed 's/# Maintainer: //' | sed 's/ <.*//g')"
+		for maint in "${maintainers[@]}"; do
+			echo "  <Maintainers>$maint</Maintainers>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		done
+		local contributors="$( grep Contributor ${srcdir}/${_pkgname}.avhb | sed 's/# Contributor: //' | sed 's/ <.*//g')"
+		for contrib in "${contributors[@]}"; do
+			echo "  <Contributors>$contrib</Contributors>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		done
+	fi
+
+    echo "  <InstalledSize>$(du -hs ${pkgdir} | sed 's/\/.*//g' | sed -e 's/[\t ]//g;/^$/d' | sed 's/K/ KB/' | sed 's/M/ MB/')</InstalledSize>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    # insert files list in xml database
+
+		# save and change IFS
+		# for file with spaces in file name
+		OLDIFS=$IFS
+		IFS=$'\n'
+
+        # find all the files in pkgdir and License file not found then filter out the first . and / with sed
+        local files=($(find  -L ${pkgdir} -type f -print | sed 's/^.pkg//'))
+
+		# restore it
+		IFS=$OLDIFS
+		# get length of an array
+		total_length=${#files[@]}
+		
+        # insert package files into xml db
+        # find total number of files in an array
+        #local arraylength=${#files[@]}
+        #message "$(gettext "Total number of files to be inserted are : ${arraylength}")"
+		for file in "${files[@]}";do
+            echo "  <Files>$file</Files>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+        done
+
+    # End of root
+    echo "</Package>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    
+    # replace > and < symbols with xml entitiy codes
+    sed -i -e 's|<=| \&#8804; |g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    sed -i -e 's|>=| \&#8805; |g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	sed -i -e 's|&|\&#38;|g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		
+	# install INSTALL file
+	if [ -f "${srcdir}/${_pkgname}.install" ]; then
+		install -Dm755 "${srcdir}/${_pkgname}.install" "${pkgdir}/usr/share/avouch/scripts/${_pkgname}.install"
+	else
+		message "$(gettext "No install file found, creating default file")"	
+		echo "# No install script needed" >> "${pkgdir}/usr/share/avouch/scripts/${_pkgname}.install"
+	fi
+}
+
+pkginfo_toml() {
+    local _pkgname="${1}"
+    install -m755 -d "${pkgdir}/usr/share/avouch/pkginfo"
+    install -m755 -d "${pkgdir}/usr/share/avouch/scripts"
+
+    message "$(gettext "Creating package xml database...")"
+    touch "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+    
+    # Start the XML document
+    echo "# Package information" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+    # Root of the XML document
+    echo "base = \"$pkgbase\" ">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+	echo "name = \"$_pkgname\" ">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+	echo "version = \"$pkgver\" ">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+	echo "release = \"$pkgrel\" ">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+	echo "distribution = \"$AVHVER\" ">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+	echo "architecture = \"$CARCH\" ">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+	echo "description = \"$pkgdesc\" ">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+	echo "source_url = \"$url\" ">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+	echo "package_url = \"https://packages.avouch.org/${groups}/${_pkgname}\" ">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+	# license
+	arry=${license[@]}
+	arrays="($(printf "%q " "${license[@]}"))"
+    for lice in "${license[@]}"; do
+        echo "license = [\"${license[@]}\"] ">> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.toml"
+    done
+    echo "  <DateCreated>${DATE} ${TIME} ${TIMEZONE}</DateCreated>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <Provides>${provides}</Provides>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    echo "  <Conflicts>${conflicts}</Conflicts>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    for group in "${groups[@]}"; do
+        echo "  <Groups>$group</Groups>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for rep in "${repo[@]}"; do
+        echo "  <Repository>$rep</Repository>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for dep in "${depends[@]}"; do
+        echo "  <Dependancies>$dep</Dependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"	
+    done
+    for optdep in "${optdepends[@]}"; do
+        local optdeps=($(echo -e "$optdep" | sed 's/ :.*//g' | sed 's/://'))
+        echo "  <OptionalDependancies>$optdeps</OptionalDependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for makedep in "${makedepends[@]}"; do
+        echo "  <MakeDependancies>$makedep</MakeDependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for checkdep in "${checkdepends[@]}"; do
+        echo "  <CheckDependancies>$checkdep</CheckDependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for reqby in "${requiredby[@]}"; do
+        echo "  <RequiredBy>$reqby</RequiredBy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for optreqby in "${optrequiredby[@]}"; do
+        echo "  <OptionalRequiredBy>$optreqby</OptionalRequiredBy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for mkreqby in "${makerequiredby[@]}"; do
+        echo "  <MakeRequiredBy>$mkreqby</MakeRequiredBy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    for chkreqby in "${checkrequiredby[@]}"; do
+        echo "  <CheckRequiredBy>$chkreqby</CheckRequiredBy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    done
+    
+    # Insert maintainer and contributors information to xml database
+	if [ ! -z ${pkgbase} ]; then
+		local maintainers="$( grep Maintainer ${srcdir}/${pkgbase}.avhb | sed 's/# Maintainer: //' | sed 's/ <.*//g')"
+		for maint in "${maintainers[@]}"; do
+			echo "  <Maintainers>$maint</Maintainers>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		done
+		local contributors="$( grep Contributor ${srcdir}/${pkgbase}.avhb | sed 's/# Contributor: //' | sed 's/ <.*//g')"
+		for contrib in "${contributors[@]}"; do
+			echo "  <Contributors>$contrib</Contributors>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		done
+	elif [ -n ${pkgname} ]; then		
+		local maintainers="$( grep Maintainer ${srcdir}/${_pkgname}.avhb | sed 's/# Maintainer: //' | sed 's/ <.*//g')"
+		for maint in "${maintainers[@]}"; do
+			echo "  <Maintainers>$maint</Maintainers>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		done
+		local contributors="$( grep Contributor ${srcdir}/${_pkgname}.avhb | sed 's/# Contributor: //' | sed 's/ <.*//g')"
+		for contrib in "${contributors[@]}"; do
+			echo "  <Contributors>$contrib</Contributors>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		done
+	fi
+
+    echo "  <InstalledSize>$(du -hs ${pkgdir} | sed 's/\/.*//g' | sed -e 's/[\t ]//g;/^$/d' | sed 's/K/ KB/' | sed 's/M/ MB/')</InstalledSize>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    # insert files list in xml database
+
+		# save and change IFS
+		# for file with spaces in file name
+		OLDIFS=$IFS
+		IFS=$'\n'
+
+        # find all the files in pkgdir and License file not found then filter out the first . and / with sed
+        local files=($(find  -L ${pkgdir} -type f -print | sed 's/^.pkg//'))
+
+		# restore it
+		IFS=$OLDIFS
+		# get length of an array
+		total_length=${#files[@]}
+		
+        # insert package files into xml db
+        # find total number of files in an array
+        #local arraylength=${#files[@]}
+        #message "$(gettext "Total number of files to be inserted are : ${arraylength}")"
+		for file in "${files[@]}";do
+            echo "  <Files>$file</Files>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+        done
+
+    # End of root
+    echo "</Package>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    
+    # replace > and < symbols with xml entitiy codes
+    sed -i -e 's|<=| \&#8804; |g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    sed -i -e 's|>=| \&#8805; |g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	sed -i -e 's|&|\&#38;|g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		
+	# install INSTALL file
+	if [ -f "${srcdir}/${_pkgname}.install" ]; then
+		install -Dm755 "${srcdir}/${_pkgname}.install" "${pkgdir}/usr/share/avouch/scripts/${_pkgname}.install"
+	else
+		message "$(gettext "No install file found, creating default file")"	
+		echo "# No install script needed" >> "${pkgdir}/usr/share/avouch/scripts/${_pkgname}.install"
+	fi
+}
+
+install_license(){
+	
+		local license_pkgname="${1}"
+		#message "$(gettext "srcdir is: $srcdir")"
+		#message "$(gettext "pwd is: ${PWD}")"	
+		
+		# -d FILE 	FILE exists and is a directory.
+		if [[ -d "${pkgdir}/usr/share/licenses/${license_pkgname}" ]]; then	
+			message "$(gettext "License already installed by ${license_pkgname} build file")"	
+		else
+			# Search for License File, Try all posible file names
+			# -z STRING 	The lengh of STRING is zero (ie it is empty).			
+			licensefile=( $( find  $srcdir -maxdepth 2 -type f -name COPYING -print ))
+			if [[ -z ${licensefile} ]]; then
+				licensefile=( $( find  $srcdir -maxdepth 2 -type f -name LICENSE -print ))
+            elif [[ -z ${licensefile} ]]; then	
+				licensefile=( $( find  $srcdir -maxdepth 2 -type f -name Copying -print ))
+            elif [[ -z ${licensefile} ]]; then		
+				licensefile=( $( find  $srcdir -maxdepth 2 -type f -name License -print ))
+			elif [[ -z ${licensefile} ]]; then
+				licensefile=( $( find  $srcdir -maxdepth 2 -type f -name Copying* -print ))
+			elif [[ -z ${licensefile} ]]; then
+				licensefile=( $( find  $srcdir -maxdepth 2 -type f -name LICENSE* -print ))
+			elif [[ -z ${licensefile} ]]; then		
+				licensefile=( $( find  $srcdir -maxdepth 2 -type f -name License* -print ))
+			fi
+			#message "$(gettext "License file is : ${licensefile}")"
+			#message "$(gettext "license file is : $licensefile")"
+			# Install License File
+			mkdir -p "${pkgdir}/usr/share/licenses/${license_pkgname}"
+			
+			# -n STRING 	The length of STRING is greater than zero.
+			if [[ -n ${licensefile} ]]; then
+				for license in "${licensefile[@]}";do
+					message "$(gettext "License file is : ${license}")"
+					install -m644 ${license} "${pkgdir}/usr/share/licenses/${license_pkgname}/LICENSE"
+				done
+			else
+				licensefilelink=( $( find  $pkgdir -type l -name LICENSE -print ))
+				# -n STRING 	The length of STRING is greater than zero.
+				if [[ -n ${licensefilelink} ]]; then			
+						message "$(gettext "Symbolic link to a license waas found!")"
+				else
+					message "$(gettext "Creating default license file")"
+					echo "Licence information will be updated soon." >> "${pkgdir}/usr/share/licenses/${license_pkgname}/LICENSE"
+				fi
+			fi
+		fi
+}
+	
+makepkg(){
+	
+	local make_pkgname="${1}"
+	local avhpkg="${make_pkgname}-${pkgver}-${pkgrel}-${AVHVER}-${CARCH}"
+	#local files=('.AUTHORS' '.INSTALL' '.LICENSE' '.PKGINFO')
+	
+	pushd "${pkgdir}"
+		## make package
+	
+		if [ ${mkpkg} == "yes" ]; then
+			# clean package installation director (such as /pkg)	
+			cleanpkg
+			# strip files
+			strip_files
+			compress_info_files
+		
+			if check_option "docs" "n" && [[ -n ${DOC_DIRS[*]} ]]; then
+				message "$(gettext "Removing doc files...")"
+				rm -rf -- ${DOC_DIRS[@]}
+			fi
+
+			if check_option "purge" "y" && [[ -n ${PURGE_TARGETS[*]} ]]; then
+				message "$(gettext "Purging unwanted files...")"
+				local pt
+				for pt in "${PURGE_TARGETS[@]}"; do
+					if [[ ${pt} = "${pt//\/}" ]]; then
+						find . ! -type d -name "${pt}" -exec rm -f -- '{}' +
+					else
+						rm -f ${pt}
+					fi
+				done
+			fi
+
+			if check_option "libtool" "n"; then
+				message "$(gettext "Removing "%s" files...")" "libtool"
+				find . ! -type d -name "*.la" -exec rm -f -- '{}' +
+			fi
+
+			if check_option "staticlibs" "n"; then
+				message "$(gettext "Removing static library files...")"
+				local l
+				while read -rd '' l; do
+					if [[ -f "${l%.a}.so" || -h "${l%.a}.so" ]]; then
+						rm "$l"
+					fi
+				done < <(find . ! -type d -name "*.a" -print0)
+			fi
+
+			if check_option "emptydirs" "n"; then
+				message "$(gettext "Removing empty directories...")"
+				find . -depth -type d -empty -exec rmdir -vp --ignore-fail-on-non-empty '{}' + 2>/dev/null
+			fi
+
+			# check existence of backup files
+			local file
+			for file in "${backup[@]}"; do
+				if [[ ! -f $file ]]; then
+					warning "$(gettext "%s entry file not in package : %s")" "backup" "$file"
+				fi
+			done
+
+			# check for references to the build and package directory
+			if find "${pkgdir}" -type f -print0 | xargs -0 grep -q -I "${srcdir}" ; then
+				warning "$(gettext "Package contains reference to %s")" "\$srcdir"
+			fi
+			if find "${pkgdir}" -type f -print0 | xargs -0 grep -q -I "${builddir}" ; then
+				warning "$(gettext "Package contains reference to %s")" "\$pkgdir"
+			fi
+
+			if check_option "zipman" "y" && [[ -n ${MAN_DIRS[*]} ]]; then
+				message "$(gettext "Compressing man and info pages...")"
+				local file files inode link
+				while read -rd ' ' inode; do
+					read file
+					find ${MAN_DIRS[@]} -type l 2>/dev/null |
+					while read -r link ; do
+						if [[ "${file}" -ef "${link}" ]] ; then
+							rm -f "$link" "${link}.gz"
+							if [[ ${file%/*} = ${link%/*} ]]; then
+								ln -s -- "${file##*/}.gz" "${link}.gz"
+							else
+								ln -s -- "/${file}.gz" "${link}.gz"
+							fi
+						fi
+					done
+					if [[ -z ${files[$inode]} ]]; then
+						files[$inode]=$file
+						gzip -9 -n -f "$file"
+					else
+						rm -f "$file"
+						ln "${files[$inode]}.gz" "${file}.gz"
+						chmod 644 "${file}.gz"
+					fi
+				done < <(find ${MAN_DIRS[@]} -type f \! -name "*.gz" \! -name "*.bz2" \
+					-exec @INODECMD@ '{}' + 2>/dev/null)
+			fi
+
+			# make package information database file
+			pkginfo_xml "${make_pkgname}"
+			#pkginfo_sqlite "${make_pkgname}"
+			# Install license file
+			install_license "${make_pkgname}"
+
+			message "$(gettext "Creating package : ${avhpkg}${PKGEXT}")"	
+			tar -Jcf "${avhpkg}${PKGEXT}" *
+		else
+
+			message "$(gettext "User opted not to make package")"	
+			exit 1
+		fi
+		
+		## move package to builddir
+		if [ -f "${avhpkg}${PKGEXT}" ]; then		
+			success "$(gettext "Package ${avhpkg}${PKGEXT} created successfully.")"	
+			# move the package to the other directory to make other packages
+			if [ -f "${builddir}/${avhpkg}${PKGEXT}" ]; then	
+				rm -f "${builddir}/${avhpkg}${PKGEXT}"
+				mv -f "${avhpkg}${PKGEXT}" "${builddir}/${avhpkg}${PKGEXT}"
+									
+			else
+				mv -f "${avhpkg}${PKGEXT}" "${builddir}/${avhpkg}${PKGEXT}"				
+			fi
+			
+			if [[ "${PARAMETER}" == "-bi" || "${PARAMETER}" == "--build-install" ]]; then
+				check_root
+				install_pkg "${avhpkg}"			
+			elif [[ "${PARAMETER}" == "-bli" || "${PARAMETER}" == "--build-list-install" ]]; then
+				check_root
+				install_pkg "${avhpkg}"
+			fi
+		fi
+	popd
+		
+	# creat a file with pkgname and pkgver for information
+	if [ ! -f "${builddir}/pkgnameandver.log" ]; then	
+		touch "${builddir}/pkknameandver.log"
+		echo "${avhpkg}${PKGEXT}" >> "${builddir}/pkgnameandver.log"
+	else
+		echo "${avhpkg}${PKGEXT}" >> "${builddir}/pkgnameandver.log"
+	fi
+		# creat a file with pkgname and pkgver
+	if [ ! -f "${builddir}/pkgname.log" ]; then	
+		touch "${builddir}/pkgname.log"
+		echo "${make_pkgname}" >> "${builddir}/pkgname.log"
+	else
+		echo "${make_pkgname}" >> "${builddir}/pkgname.log"			
+	fi
+	
+	unset make_pkgname
+
+}
+
+# install package
+install_pkg(){
+	
+	# check for root
+	check_root	
+	pushd "/"		
+		if [[ ${install_opt} == "yes" ]]; then			
+			tar -Jxf "${builddir}/${1}${PKGEXT}"
+			/usr/bin/ldconfig			
+			success "$(gettext "Package ${1} installed successfully.")"			
+		else			
+			message "$(gettext "User opted not to install the package.")"	
+		fi
+	popd
+}
+
+
+########################################################################
+package_build(){
+    #echo "recalled : ${1}"
+	
+	# clear user-specified buildflags if requested
+	if check_option "buildflags" "n"; then
+		unset CPPFLAGS CFLAGS CXXFLAGS LDFLAGS	
+	else 
+		export CPPFLAGS CFLAGS CXXFLAGS LDFLAGS
+	fi
+
+	if check_option "debug" "y"; then
+		CFLAGS+=" $DEBUG_CFLAGS"
+		CXXFLAGS+=" $DEBUG_CXXFLAGS"
+	fi
+
+	# clear user-specified makeflags if requested
+	if check_option "makeflags" "n"; then
+		unset MAKEFLAGS
+	fi
+
+    
+	copy_srcbundledir ${1}
+	pushd "${srcdir}"
+		# remove source directory if it is alrady extracted to make build clean
+		clean_srcdir
+		extract_file
+		
+		if ( function_exists 'getsrc' );then
+			pushd "${srcdir}"
+				# run function getsrc() from PKGBUILD file		
+				#getsrc 2>&1 | tee -a "${srcdir}/build.log"
+				getsrc	
+			popd
+		else
+			warning "$(gettext "Funtion getsrc() does not exist.")"			
+		fi
+
+		
+		if ( function_exists 'pkgver' );then
+			pushd "${srcdir}"
+				# run function getsrc() from PKGBUILD file		
+				#pkgver 2>&1 | tee -a "${srcdir}/build.log"
+				pkgver		
+			popd
+		else
+			warning "$(gettext "Funtion pkgver() does not exist.")"			
+		fi
+		# apply patches in the source variable
+		if ( function_exists 'prepare' );then
+			pushd "${srcdir}"
+				# run function prepare() from PKGBUILD file
+				#prepare 2>&1 | tee -a "${srcdir}/build.log"				
+				prepare	
+			popd
+		else
+			warning "$(gettext "Funtion prepare() does not exist.")"
+		fi
+		
+		
+		local retval=0
+		# check for the build funtion exists or not
+		if ( function_exists 'build' );then
+			pushd "${srcdir}"
+				# run function avouch_config_guess_script() from PKGBUILD file
+				# avouch_config_guess_script
+				#build 2>&1 | tee -a "${srcdir}/build.log" 
+				build || retval=$?
+				#retval=$? # '$?' is the return value of the previous command
+				message "$(gettext "Retun value is : ${retval}")"
+				function_status "$retval"
+			popd
+		else			
+			warning "$(gettext "Funtion build() does not exist.")"
+		fi
+		
+		# check for the check() funtion exists or not
+		if ( function_exists 'check' );then
+			pushd "${srcdir}"
+				# run function check() from PKGBUILD file
+				#check 2>&1 | tee -a "${srcdir}/build.log"
+				check
+			popd
+		else
+			warning "$(gettext "Funtion check() does not exist.")"
+		fi
+		# run function package() from PKGBUILD file
+		
+		# find total number of files in an array
+		local total_no_of_packages="${#pkgname[@]}"
+		message "$(gettext "Total packages in array : ${arraylength}")"
+		message "$(gettext "Packages are : ${pkgname[@]}")"
+		
+		if [ ${total_no_of_packages} == 1 ]; then
+			clean_pkgdir
+			message "$(gettext "Package is : ${pkgname}")"
+			pushd "${srcdir}"
+				package	
+				makepkg "${pkgname}"
+			popd	
+
+		elif [ ${total_no_of_packages} > 1 ]; then
+			#for ((length=0; i<=$(( $arraylength-1 )); length++))
+			for pkg in ${pkgname[@]};do		
+				clean_pkgdir
+				message "$(gettext "Package is : ${pkg}")"
+				pushd "${srcdir}"	
+					package_"${pkg}"
+					makepkg "${pkg}"
+				popd
+			done
+		fi
+}
+
+check_for_pkg_already_install(){
+    if [ -f "/usr/share/avouch/pkginfo/${1}.xml" ]; then	
+        message "$(gettext "Package ${1} already installed")"
+    else
+        install_dependencies ${1}
+    fi
+}
+
+get_all_dependencies(){
+    # angle brackets are used to hack the exact match
+    local total_number_of_dependancies=( $(grep -c "<Dependancies>" "/var/avouch/ee/cache/${1}.xml") )
+	#local total_number_of_dependancies=( $(grep -oPm1 "(?<=<Dependancies>)[^<]+" "/var/avouch/ee/cache/${1}.xml") )
+    message "$(gettext "Number of depandancies are :  $total_number_of_dependancies")"
+    local array_of_total_dependancies=( $(grep -e "<Dependancies>" "/var/avouch/ee/cache/${1}.xml"  | sed 's/<Dependancies>//' | sed 's/<\/Dependancies>//' ) )
+    #echo "Dependencies are : $total_number_of_dependancies"
+	#echo "${BOLD}  Total depandancies are :  ${total_number_of_dependancies[@]}"
+    
+    for dep in ${array_of_total_dependancies[@]}
+        do 
+            check_for_pkg_already_install ${dep}
+            #log the entire loop
+    done
+}
+
+install_dependencies(){
+
+    verify_package_exist ${1}
+    get_all_dependencies ${1}
+    
+    # install package
+    #pushd "${TMPDIR}"
+    #echo "tmpdir is ${TMPDIR}"
+    message "$(gettext "installing depandency...")"
+    #rsync -arv "${TMPDIR}/" /
+    cp -rf "${TMPDIR}/"* /
+    #popd
+    /usr/bin/ldconfig
+    post
+	# remove tmpdir
+	rm -rf ${TMPDIR}
+	rm -f /var/avouch/ee/cache/${1}.xml
+	message "$(gettext "Dependancy : ${1} installed successfully")"
+
+}
+
+package_install() {
+    download_repo_db
+	#local pkg_to_install=
+	for pkg in ${PKGNAME[@]}; do
+		message "$(gettext "Package is : $pkg")"
+		verify_package_exist ${pkg}
+		get_all_dependencies ${pkg}
+		
+		# install package
+		#pushd "${TMPDIR}"
+			#echo "tmpdir is ${TMPDIR}"
+			message "$(gettext "installing package...")"
+			#rsync -arv "${TMPDIR}/" /
+			cp -rf "${TMPDIR}/"* /
+		#popd
+		/usr/bin/ldconfig
+		post
+		# remove tmpdir
+		rm -rf ${TMPDIR}
+		rm -f /var/avouch/ee/cache/$pkg.xml
+		success "$(gettext "Package $pkg installed successfully")"
+
+	done
+}
+
+package_uninstall() {
+    local dbpath="/usr/share/avouch/pkginfo"
+    for pkg in ${PKGNAME[@]};do
+        message "$(gettext "Package is : $PKGNAME")"        
+        local dbname="${pkg}".xml
+		local rootdir="/"
+
+		# check if the file exists
+		if [ -f "${dbpath}/${dbname}" ]; then
+			if [ -f "/usr/bin/grep" ]; then
+				# find all the files in database table files and then filter out
+				# the first line nombers and | with sed			
+				#files=( $(xpath -q -e '/Package/Files' ${dbpath}/${dbname} | sed 's/<Files>//' | sed 's/<\/Files>//'))	
+				local files=( $(grep -e "<Files>" "${dbpath}/${dbname}"  | sed 's/<Files>//' | sed 's/<\/Files>//' ) )
+				#echo "${files[@]}" >> /tmp/files.txt
+								
+				#pushd /
+					message "$(gettext "Removing package files...")"
+					for file in ${files[@]};do
+						rm -v ${file}
+					done 2>&1 | tee -a /var/avouch/log/${pkg}-uninstall.log #log the entire loop
+				#popd
+					success "Package ${pkg} uninstalled sucessfully"
+			else
+					echo "$(gettext "grep not found!")"
+					exit 1
+			fi
+		else
+			error "$(gettext "$pkg: package not found!")"
+			exit 1
+		fi
+    done
+}
+
+########################################################################
+get_parameters(){    
+	if [[ ! -n "${PARAMETER}" ]]; then
+		message "$(gettext "Please provide valid parameter")"
+		exit 1
+    elif [[ "${PARAMETER}" == "-b" || "${PARAMETER}" == "--build" ]]; then
+		build_tools_exists
+        unset srcdir
+        srcdir="${builddir}/${PKGNAME}"
+        mkdir -p $srcdir 
+        package_build $PKGNAME  2>&1 | tee -a "${srcdir}/build.log"
+
+	elif [[ "${PARAMETER}" == "-bi" || "${PARAMETER}" == "--build --install" ]]; then
+		check_root
+		build_tools_exists
+        unset srcdir
+        srcdir="${builddir}/${PKGNAME}"
+        mkdir -p $srcdir 
+        package_build $PKGNAME  2>&1 | tee -a "${srcdir}/build.log"
+        
+    elif [[ "${PARAMETER}" == "-bl" || "${PARAMETER}" == "--build-list" ]]; then
+		for pkgs in ${PKGNAME[@]}
+		do
+            #echo " pkg is : $pkgs" 
+			build_tools_exists
+            unset srcdir
+            srcdir="${builddir}/${pkgs}" 
+            mkdir -p $srcdir           
+            package_build $pkgs  2>&1 | tee -a "${srcdir}/build.log" 
+        done
+	 elif [[ "${PARAMETER}" == "-bli" || "${PARAMETER}" == "--build-list" ]]; then
+		for pkgs in ${PKGNAME[@]}
+		do
+            #echo " pkg is : $pkgs"
+			check_root
+			build_tools_exists
+            unset srcdir
+            srcdir="${builddir}/${pkgs}" 
+            mkdir -p $srcdir           
+            package_build $pkgs  2>&1 | tee -a "${srcdir}/build.log" 
+        done
+     
+    elif [[ "${PARAMETER}" == "-i" || "${PARAMETER}" == "--install" ]]; then
+		#info "$(gettext "Install Parameter")"
+		check_root
+		package_install
+		
+	elif [[ "${PARAMETER}" == "-u" || "${PARAMETER}" == "--uninstall" ]]; then
+		#info "$(gettext "Remove Parameter")"
+		check_root
+		package_uninstall
+	
+	elif [[ "x${UPDATEDB}" == "x1" ]]; then
+		check_root
+		updatePackageDatabase
+
+	else 
+		info "$(gettext "Invalid parameter, please provide correct parameter")"
+		exit 1
+	fi
+}
+
+main() {
+    local name=
+	echo "reached here : and args are, $1"
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --) shift; break ;;
+            -h) show_usage; exit ;;
+            --help) show_help; exit ;;
+            -b|--build)
+                spawn_dir=${2-}; shift ;;
+            -d|--dir)
+                spawn_dir=${2-}; shift ;;
+            -r|--as-root)
+                spawn_user_arg='root' ;;
+            -n|--dry-run) E='echo' ;;
+            -u|--user)
+                spawn_user_arg=${2-}; shift ;;
+            --arch)
+                spawn_arch=${2-}; shift ;;
+            --bind-home)
+                bind_home=${2-}; shift ;;
+            --bind-dir)
+                bind_dir_args=${bind_dir_args-}${FS}${2-}; shift ;;
+            --with-ssh-agent)
+                with_ssh_agent=1 ;;
+            --with-ssh-dir)
+                with_ssh_dir=1 ;;
+            --with-x11)
+                with_x11=1 ;;
+            --with-pulseaudio)
+                with_pulseaudio=1 ;;
+            --to-stderr)
+                to_stderr=1 ;;
+            --share-devices)
+                share_devices=1 ;;
+            --using-docker)
+                spawn_type='docker' ;;
+            --using-nspawn)
+                spawn_type='nspawn' ;;
+            --using-chroot)
+                spawn_type='chroot' ;;
+            --unlock)
+                do_unlock=1 ;;
+            --cleanup)
+                do_cleanup=1 ;;
+            -*)
+                die "unrecognized argument: $1";;
+            *)
+                die "unrecognized argument: $1";;
+        esac
+        shift
+    done
+}
+
+# main() {
+# 	echo "Arguments are : ${1}"
+# 	parse_command_line "$@"
+# 	get_parameters
+# 	local test_for_bfd_linker=$(/usr/bin/ld --version | grep "GNU ld")
+# 	if [ ! -z "${test_for_bfd_linker}" ]; then
+# 		enable_ld_gold
+# 	fi
+# }
+
+# main() {
+#     local in_file="${1}" out_file="${2}"
+# 	echo "Arguments are: ${1}"
+#     if [ -z "$in_file" ]; then
+#         show_usage; exit 0
+#     fi
+#     case $in_file in
+#         -h|--help)
+#             show_usage; exit 0 ;;
+#     esac
+
+# }
+
+if [ $# = 0 ]; then
+    show_usage
+    exit 0
+fi
+
+main "$@"

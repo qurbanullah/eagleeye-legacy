@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Avouch Linux package updater
+GenericName=Package Updater
+Comment=Avouch Linux package updater
+Exec=/usr/bin/eeupdater %F
+MimeType=application/x-eeupdater;
+Icon=package-x-generic
+Terminal=false
+Type=Application
+StartupNotify=true
+Categories=System;Installer;QT;
+Name[en_US]=eeupdater
+NoDisplay=true

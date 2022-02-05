@@ -1,0 +1,6 @@
+QWidget { background-color: #0b2732; }
+QLineEdit { border: 1px solid white; }
+QTextEdit { border: 1px solid white; }
+QCheckBox { color: white; }
+QCheckBox::checked  { color: green; }
+QRadioButton::checked { color:green; }

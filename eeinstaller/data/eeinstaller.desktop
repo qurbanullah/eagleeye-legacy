@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Avouch Linux package installer
+GenericName=Package Installer
+Comment=Avouch Linux package installer
+Exec=/usr/bin/ee_installer %F
+MimeType=application/x-eagleeye;
+Icon=package-x-generic
+Terminal=false
+Type=Application
+StartupNotify=true
+Categories=System;Installer;QT;
+Name[en_US]=eeinstaller
+NoDisplay=true

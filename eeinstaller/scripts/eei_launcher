@@ -1,0 +1,31 @@
+#!/bin/bash
+
+#  Only permit one instance of EagleEye to execute at a time
+#
+#if test "z`ps -e | grep eagleeyebin`" != "z"; then
+#	echo "The process eagleeyebin is already running."
+#	echo "Only one eagleeyebin process is permitted."
+#	exit 1
+#fi
+
+
+#  Define base command for executing EagleEye
+#
+BASE_CMD="/usr/bin/ee_script $*"
+
+#  If no root privileges, then invoke eagleeyebin directly
+#  so that a graphical warning is displayed.
+#
+if test "x`id -u`" != "x0"; then
+	echo "Root privileges are required for running eagleeye."	
+	exit 1
+else 
+	echo "Starting eagleeye."
+	# woekaround for Qt5 application look like gtk while running as root
+	# use -style flag to make the look like gtk while runiing as root (only for QT5)
+	#$BASE_CMD -style gtk
+	
+	# This does the job, in Qt 5 and Gtk+ 3:
+	# export QT_STYLE_OVERRIDE=gtk
+	$BASE_CMD
+fi

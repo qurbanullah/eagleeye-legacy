@@ -1,0 +1,10 @@
+<RCC>
+    <qresource prefix="/">
+        <file>images/WatermarkPixmapWelcome.png</file>
+        <file>images/WatermarkPixmapCopyingFiles.png</file>
+        <file>images/WatermarkPixmapCompleted.png</file>
+        <file>images/WatermarkPixmapEULA.png</file>
+        <file>images/WatermarkPixmapInfo.png</file>
+        <file>qss/default.qss</file>
+    </qresource>
+</RCC>

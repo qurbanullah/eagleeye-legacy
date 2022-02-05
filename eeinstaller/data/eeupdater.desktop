@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Avouch Linux package installer
+GenericName=Package Installer
+Comment=Avouch Linux Updater
+Exec=/usr/bin/ee_updater %F
+MimeType=application/x-eagleeye;
+Icon=package-x-generic
+Terminal=false
+Type=Application
+StartupNotify=true
+Categories=System;Installer;QT;
+Name[en_US]=eeupdater
+NoDisplay=true

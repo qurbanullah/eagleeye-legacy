@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+    <mime-type type="application/x-avouch-build">
+        <comment>Avouch Build File</comment>
+        <icon name="package-x-generic"/>
+        <alias type="application/x-avouch-build"/>
+        <glob pattern="*.AVHB"/>
+        <glob pattern="*.avhb"/>
+    </mime-type>
+</mime-info>
