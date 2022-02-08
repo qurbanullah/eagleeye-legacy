@@ -1779,7 +1779,7 @@ makepkg(){
 
 			if check_option "emptydirs" "n"; then
 				message "$(gettext "Removing empty directories...")"
-				find . -depth -type d -exec rmdir {} + 2>/dev/null
+				find . -depth -type d -exec rmdir {} + 2>/dev/null  || :
 			fi
 
 			# check existence of backup files
