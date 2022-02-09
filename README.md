@@ -1,4 +1,4 @@
-EagleEye - Readme
+# EagleEye - Readme
 ===================
 
 Version 0.2.0
@@ -7,12 +7,12 @@ Package manager of Avouch Linux for creating, installing and updating packges.
 
 https://avouch.org/packages/package-info/eagleeye
 
-Summary
+# Summary
 -------
 
 EagleEye is intended as Package manager of Avouch Linux for creating, installing and updating packges.
 
-Usage
+# Usage
 ---------
 
 Usage: ee [OPTIONS...] <package_name>
@@ -29,32 +29,32 @@ Usage: ee [OPTIONS...] <package_name>
 	-ud|--update-database           Update package database
 	-up|--update-package            Update package 
 
-Example
+# Example
 ---------
 
-# For installing a package rxecute the following command:-
-ee -i <package_name>
+	For installing a package rxecute the following command:-
+	ee -i <package_name>
 
-# For removing a package rxecute the following command:-
-ee -r <package_name>
+	For removing a package rxecute the following command:-
+	ee -r <package_name>
 
-# For building a package rxecute the following command:-
-ee -b <package_name>
+	For building a package rxecute the following command:-
+	ee -b <package_name>
 
-# For building and installing a package rxecute the following command:-
-ee -bi <package_name>
+	For building and installing a package rxecute the following command:-
+	ee -bi <package_name>
 
-# For building and installing multiple packages from a list file rxecute the following command:-
-ee -bli <package_name>
+	For building and installing multiple packages from a list file rxecute the following command:-
+	ee -bli <package_name>
 
-Copyright
+# Copyright
 ---------
 
 Copyright © 2009 onwards -- Qurban Ullah
 
 Certain libraries are copyrighted by their respective authors;
 
-License
+# License
 -------
 
 This program is free software; you can redistribute it and/or modify it under
