@@ -41,7 +41,7 @@ Usage: ee [OPTIONS...] <package_name>
 	For building a package execute the following command:-
 	ee -b <package_name>
 
-	For building and installing a package rxecute the following command:-
+	For building and installing a package execute the following command:-
 	ee -bi <package_name>
 
 	For building and installing multiple packages from a list file rxecute the following command:-
