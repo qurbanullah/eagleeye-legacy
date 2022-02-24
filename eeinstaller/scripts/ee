@@ -1418,7 +1418,7 @@ pkginfo_xml() {
     done
 	for conf in "${conflicts[@]}"; do
 		local conf_filtered=`echo ${conf} | sed -e 's|<=| \&#8804;|g' | sed -e 's|>=| \&#8805;|g' | sed -e 's|&|\&#38;|g' | sed -e 's|+|\&#43;|g' | sed -e 's|<|\&#60;|g' | sed -e 's|>|\&#62;|g'`
-        echo "    <Conflicts>${conf_filtered}</Conflicts>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+        echo "    <Conflicts>${conf}</Conflicts>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     done
     
     
@@ -1521,20 +1521,31 @@ pkginfo_xml() {
         #local arraylength=${#files[@]}
         #message "$(gettext "Total number of files to be inserted are : ${arraylength}")"
 		for file in "${files[@]}";do
-		    local file_filtered=`echo ${file} | sed -e 's|<=| \&#8804;|g' | sed -e 's|>=| \&#8805;|g' | sed -e 's|&|\&#38;|g' | sed -e 's|+|\&#43;|g' | sed -e 's|<|\&#60;|g' | sed -e 's|>|\&#62;|g'`
-            echo "    <Files>${file_filtered}</Files>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+		    # local file_filtered=`echo ${file} | sed -e 's|<=| \&#8804;|g' | sed -e 's|>=| \&#8805;|g' | sed -e 's|&|\&#38;|g' | sed -e 's|+|\&#43;|g' | sed -e 's|<|\&#60;|g' | sed -e 's|>|\&#62;|g'`
+            echo "    <Files>${file}</Files>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
         done
 		# echo "  </${_pkgname}>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     # End of root
     echo "</Package>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
 
-    # # replace >= and <= symbols with xml entitiy codes
-    sed -i -e 's|<=| \&#8804; |g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
-    sed -i -e 's|>=| \&#8805; |g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
-	# # replace & symbol with xml entity codes
-	sed -i -e 's|&|\&#38;|g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
-	# # replace + symbol with xml entity codes
-	sed -i -e 's|+|\&#43;|g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	# replace >= and <= symbols with xml entitiy codes
+	cat "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml" | \
+		sed 's|<=| \&#8804; |g' | \
+		sed 's|>=| \&#8805; |g' | \
+		sed 's|&|\&#38;|g' | \
+		sed 's|+|\&#43;|g' \
+		> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}-new.xml"
+	mv -f "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}-new.xml" "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    
+	# # replace >= and <= symbols with xml entitiy codes
+    # sed -i -e 's|<=| \&#8804; |g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+    # sed -i -e 's|>=| \&#8805; |g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	# sed -i -e 's|<|\&#60;|g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	# sed -i -e 's|>|\&#62;|g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	# # # replace & symbol with xml entity codes
+	# sed -i -e 's|&|\&#38;|g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	# # # replace + symbol with xml entity codes
+	# sed -i -e 's|+|\&#43;|g' "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
 		
 	# install INSTALL file
 	if [ -f "${srcdir}/${_pkgname}.install" ]; then
