@@ -862,7 +862,12 @@ installPackage() {
 			local packageDependancies=""
 		else
 			local packageDependancies=$(getXmlElementText "${1}" "Dependancies" "${packagesDatabase}")
-		fi		
+		fi
+		if [ -z $(getXmlElementText "${1}" "OptionalDependancies" "${packagesDatabase}") ]; then
+			local packageOptionalDependancies=""
+		else
+			local packageOptionalDependancies=$(getXmlElementText "${1}" "OptionalDependancies" "${packagesDatabase}")
+		fi	
 		local packageMaintainers=$(getXmlElementText "${1}" "Maintainers" "${packagesDatabase}")
 		local packageContributors=$(getXmlElementText "${1}" "Contributors" "${packagesDatabase}")
 		local packageInstalledSize=$(getXmlElementText "${1}" "InstalledSize" "${packagesDatabase}")
@@ -879,6 +884,13 @@ installPackage() {
 			for dep in ${packageDependancies[@]}
 				do 
 					installDependancy ${dep}
+					#log the entire loop
+			done
+
+			message "$(gettext "Optional Depandancies are :  ${packageDependancies[@]}")"
+			for optdep in ${packageDependancies[@]}
+				do	# delete packge description which exists after colon :				
+					installDependancy ${optdep%:*}
 					#log the entire loop
 			done
 			# download package				
