@@ -16,6 +16,7 @@ export LANG="en_US"
 # echo "Parameters are : $@"
 # keep track of the last executed command
 trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
+
 # echo an error message if return code in not zero before exiting
 last_exit_code=$?
 if [ $last_exit_code -ne 0 ];then
@@ -23,9 +24,10 @@ if [ $last_exit_code -ne 0 ];then
 fi
 
 cachedir='/var/avouch/ee/cache'
-    if [ ! -d "$cachedir" ]; then
-        mkdir -p "$cachedir"
-    fi
+if [ ! -d "$cachedir" ]; then
+    mkdir -p "$cachedir"
+fi
+
 if [ -f "/etc/ee.conf" ]; then
 	. "/etc/ee.conf"
 else
@@ -1482,35 +1484,43 @@ pkginfo_xml() {
     # Insert maintainer and contributors information to xml database
 	if [ ! -z ${pkgbase} ]; then
 		eval local maintainers=($(grep '# Maintainer' ${srcdir}/${pkgbase}.avhb | sed 's/# Maintainer: /"/' | sed 's/ <.*/"/g'))
-		for maint in "${maintainers[@]}"; do
-			echo "    <Maintainers>$maint</Maintainers>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
-		done
+		eval local maintainersEmail=($(grep '# Maintainer' ${srcdir}/${pkgbase}.avhb | sed 's/.*</"/g' | sed 's/>/"/g'))
+
 		eval local contributors=($(grep '# Contributor' ${srcdir}/${pkgbase}.avhb | sed 's/# Contributor: /"/' | sed 's/ <.*/"/g'))
-		for contrib in "${contributors[@]}"; do
-			echo "    <Contributors>$contrib</Contributors>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
-		done
+		eval local contributorsEmail=($(grep '# Contributor' ${srcdir}/${pkgbase}.avhb | sed 's/.*</"/g' | sed 's/>/"/g'))
 	elif [ -n ${pkgname} ]; then
 		if [ -f ${srcdir}/${_pkgname}.avhb ];then
 			# eval is the solution for treating sting in qotes as one element of array
 			eval local maintainers=($(grep '# Maintainer'  ${srcdir}/${_pkgname}.avhb | sed 's/# Maintainer: /"/' | sed 's/ <.*/"/g'))
-			for maint in "${maintainers[@]}"; do
-				echo "    <Maintainers>${maint}</Maintainers>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
-			done
+			eval local maintainersEmail=($(grep '# Maintainer' ${srcdir}/${_pkgname}.avhb | sed 's/.*</"/g' | sed 's/>/"/g'))
+
 			eval local contributors=($(grep '# Contributor' ${srcdir}/${_pkgname}.avhb | sed 's/# Contributor: /"/' | sed 's/ <.*/"/g'))
-			for contrib in "${contributors[@]}"; do
-				echo "    <Contributors>${contrib}</Contributors>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
-			done
+			eval local contributorsEmail=($(grep '# Contributor' ${srcdir}/${_pkgname}.avhb | sed 's/.*</"/g' | sed 's/>/"/g'))
 		else
 			eval local maintainers=($(grep '# Maintainer' ${srcdir}/${pkgbase}.avhb | sed 's/# Maintainer: /"/' | sed 's/ <.*/"/g'))
-			for maint in "${maintainers[@]}"; do
-				echo "    <Maintainers>$maint</Maintainers>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
-			done
+			eval local maintainersEmail=($(grep '# Maintainer' ${srcdir}/${pkgbase}.avhb | sed 's/.*</"/g' | sed 's/>/"/g'))
+
 			eval local contributors=($(grep '# Contributor' ${srcdir}/${pkgbase}.avhb | sed 's/# Contributor: /"/' | sed 's/ <.*/"/g'))
-			for contrib in "${contributors[@]}"; do
-				echo "    <Contributors>$contrib</Contributors>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
-			done
+			eval local contributorsEmail=($(grep '# Contributor' ${srcdir}/${pkgbase}.avhb | sed 's/.*</"/g' | sed 's/>/"/g'))
 		fi
 	fi
+
+	for maint in "${maintainers[@]}"; do
+		echo "    <Maintainer>$maint</Maintainer>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	done
+
+	for maintEmail in "${maintainersEmail[@]}"; do
+			echo "    <MaintainerEmail>${maintEmail}</MaintainerEmail>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	done
+
+	for contrib in "${contributors[@]}"; do
+		echo "    <Contributor>$contrib</Contributor>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	done
+
+	for contribEmail in "${contributorsEmail[@]}"; do
+		echo "    <ContributorEmail>${contribEmail}</ContributorEmail>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+	done
+
 
     echo "    <InstalledSize>$(du -hs ${pkgdir} | sed 's/\/.*//g' | sed -e 's/[\t ]//g;/^$/d' | sed 's/K/ KB/' | sed 's/M/ MB/')</InstalledSize>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     # insert files list in xml database
