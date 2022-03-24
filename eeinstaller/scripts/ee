@@ -8,7 +8,7 @@ set -e
 
 BASENAME="$(basename "${0}")"
 PARAMETER=${1}
-EEVER=0.2.0
+EEVER=0.2.1
 
 # change to english locale!
 export LANG="en_US"
@@ -32,7 +32,7 @@ if [ -f "/etc/ee.conf" ]; then
 	. "/etc/ee.conf"
 else
 	# fallback to default
-	AVHVER="avh02"
+	AVHVER="avh021"
 	ARCH="x86_64"
 
 	# INFOURL="http://127.0.0.1:8000/api/download-package-info-file"
@@ -155,7 +155,7 @@ else
 	mkpkg="yes"
 
 	## Avouch package extension
-	PKGEXT='.avhp.tar.zstd'
+	PKGEXT='.avhp.tar.zst'
 
 	## package install option
 	install_opt="yes"
@@ -315,6 +315,26 @@ checkForRoot () {
 		return 0
 	fi
 }
+########################################################################
+# Checks to see if user has sudo privileges
+#
+#  usage : checkForSudoPrivilege
+# return : 0   - user has sudo privileges and password is not required
+#          1   - user has no sudo privileges
+#          2   - user has sudo privileges but password is required
+##
+checkForSudoPrivilege () {
+	local prompt
+    prompt=$(sudo -nv 2>&1)
+
+	if [ $? -eq 0 ]; then
+		return 0
+	elif echo $prompt | grep -q '^sudo:'; then
+		return 0
+	else
+		return 1
+	fi
+}
 
 is_root () {
     return $(id -u)
@@ -325,11 +345,11 @@ has_sudo() {
 
     prompt=$(sudo -nv 2>&1)
     if [ $? -eq 0 ]; then
-    echo "has_sudo__pass_set"
+    	echo "has_sudo__pass_set"
     elif echo $prompt | grep -q '^sudo:'; then
-    echo "has_sudo__needs_pass"
+    	echo "has_sudo__needs_pass"
     else
-    echo "no_sudo"
+    	echo "no_sudo"
     fi
 }
 
@@ -568,8 +588,6 @@ check_buildenv() {
 	# not found
 	return 127
 }
-
-
 
 ##
 #  usage : in_array( $needle, $haystack )
@@ -857,21 +875,23 @@ installPackage() {
 		local packagePackageUrl=$(getXmlElementText "${1}" "PackageUrl" "${packagesDatabase}")
 		local packageLicense=$(getXmlElementText "${1}" "License" "${packagesDatabase}")
 		local packageDateCreated=$(getXmlElementText "${1}" "DateCreated" "${packagesDatabase}")
-		local packageProvides=$(getXmlElementText "${1}" "Provides" "${packagesDatabase}")
-		local packageConflicts=$(getXmlElementText "${1}" "Conflicts" "${packagesDatabase}")
-		local packageGroups=$(getXmlElementText "${1}" "Groups" "${packagesDatabase}")
-		if [ -z $(getXmlElementText "${1}" "Dependancies" "${packagesDatabase}") ]; then
+		local packageProvides=$(getXmlElementText "${1}" "Provide" "${packagesDatabase}")
+		local packageConflicts=$(getXmlElementText "${1}" "Conflict" "${packagesDatabase}")
+		local packageGroups=$(getXmlElementText "${1}" "Group" "${packagesDatabase}")
+		if [ -z $(getXmlElementText "${1}" "Dependancy" "${packagesDatabase}") ]; then
 			local packageDependancies=""
 		else
-			local packageDependancies=$(getXmlElementText "${1}" "Dependancies" "${packagesDatabase}")
+			local packageDependancies=$(getXmlElementText "${1}" "Dependancy" "${packagesDatabase}")
 		fi
-		if [ -z $(getXmlElementText "${1}" "OptionalDependancies" "${packagesDatabase}") ]; then
+		if [ -z $(getXmlElementText "${1}" "OptionalDependancy" "${packagesDatabase}") ]; then
 			local packageOptionalDependancies=""
 		else
-			local packageOptionalDependancies=$(getXmlElementText "${1}" "OptionalDependancies" "${packagesDatabase}")
+			local packageOptionalDependancies=$(getXmlElementText "${1}" "OptionalDependancy" "${packagesDatabase}")
 		fi	
-		local packageMaintainers=$(getXmlElementText "${1}" "Maintainers" "${packagesDatabase}")
-		local packageContributors=$(getXmlElementText "${1}" "Contributors" "${packagesDatabase}")
+		local packageMaintainers=$(getXmlElementText "${1}" "Maintainer" "${packagesDatabase}")
+		local packageMaintainersEmail=$(getXmlElementText "${1}" "MaintainerEmail" "${packagesDatabase}")
+		local packageContributors=$(getXmlElementText "${1}" "Contributor" "${packagesDatabase}")
+		local packageContributorsEmail=$(getXmlElementText "${1}" "ContributorEmail" "${packagesDatabase}")
 		local packageInstalledSize=$(getXmlElementText "${1}" "InstalledSize" "${packagesDatabase}")
 		# local packageFiles=$(getXmlElementText "${1}" "Files" "${packagesFilesDatabase}")
 
@@ -978,12 +998,14 @@ installPackageFromFile() {
 		local packagePackageUrl=$(getXmlElementText "*" "PackageUrl" "${packageDatabaseFile}")
 		local packageLicense=$(getXmlElementText "*" "License" "${packageDatabaseFile}")
 		local packageDateCreated=$(getXmlElementText "*" "DateCreated" "${packageDatabaseFile}")
-		local packageProvides=$(getXmlElementText "*" "Provides" "${packageDatabaseFile}")
-		local packageConflicts=$(getXmlElementText "*" "Conflicts" "${packageDatabaseFile}")
-		local packageGroups=$(getXmlElementText "*" "Groups" "${packageDatabaseFile}")
-		local packageDependancies=$(getXmlElementText "*" "Dependancies" "${packageDatabaseFile}")
-		local packageMaintainers=$(getXmlElementText "*" "Maintainers" "${packageDatabaseFile}")
-		local packageContributors=$(getXmlElementText "*" "Contributors" "${packageDatabaseFile}")
+		local packageProvides=$(getXmlElementText "*" "Provide" "${packageDatabaseFile}")
+		local packageConflicts=$(getXmlElementText "*" "Conflict" "${packageDatabaseFile}")
+		local packageGroups=$(getXmlElementText "*" "Group" "${packageDatabaseFile}")
+		local packageDependancies=$(getXmlElementText "*" "Dependancy" "${packageDatabaseFile}")
+		local packageMaintainers=$(getXmlElementText "*" "Maintainer" "${packageDatabaseFile}")
+		local packageMaintainersEmail=$(getXmlElementText "*" "MaintainerEmail" "${packageDatabaseFile}")
+		local packageContributors=$(getXmlElementText "*" "Contributor" "${packageDatabaseFile}")
+		local packageContributorsEmail=$(getXmlElementText "*" "ContributorEmail" "${packageDatabaseFile}")
 		local packageInstalledSize=$(getXmlElementText "*" "InstalledSize" "${packageDatabaseFile}")
 		local packageFiles=$(getXmlElementText "*" "Files" "${packageDatabaseFile}")
 
@@ -1041,14 +1063,16 @@ updatePackage() {
 		local packagePackageUrl=$(getXmlElementText "${1}" "PackageUrl" "${packagesDatabase}")
 		local packageLicense=$(getXmlElementText "${1}" "License" "${packagesDatabase}")
 		local packageDateCreated=$(getXmlElementText "${1}" "DateCreated" "${packagesDatabase}")
-		local packageProvides=$(getXmlElementText "${1}" "Provides" "${packagesDatabase}")
-		local packageConflicts=$(getXmlElementText "${1}" "Conflicts" "${packagesDatabase}")
-		local packageGroups=$(getXmlElementText "${1}" "Groups" "${packagesDatabase}")
-		local packageDependancies=$(getXmlElementText "${1}" "Dependancies" "${packagesDatabase}")
-		local packageMaintainers=$(getXmlElementText "${1}" "Maintainers" "${packagesDatabase}")
-		local packageContributors=$(getXmlElementText "${1}" "Contributors" "${packagesDatabase}")
+		local packageProvides=$(getXmlElementText "${1}" "Provide" "${packagesDatabase}")
+		local packageConflicts=$(getXmlElementText "${1}" "Conflict" "${packagesDatabase}")
+		local packageGroups=$(getXmlElementText "${1}" "Group" "${packagesDatabase}")
+		local packageDependancies=$(getXmlElementText "${1}" "Dependancy" "${packagesDatabase}")
+		local packageMaintainers=$(getXmlElementText "${1}" "Maintainer" "${packagesDatabase}")
+		local packageMaintainersEmail=$(getXmlElementText "${1}" "MaintainerEmail" "${packagesDatabase}")
+		local packageContributors=$(getXmlElementText "${1}" "Contributor" "${packagesDatabase}")
+		local packageContributorsEmail=$(getXmlElementText "${1}" "ContributorEmail" "${packagesDatabase}")
 		local packageInstalledSize=$(getXmlElementText "${1}" "InstalledSize" "${packagesDatabase}")
-		# local packageFiles=$(getXmlElementText "${1}" "Files" "${packagesFilesDatabase}")
+		# local packageFiles=$(getXmlElementText "${1}" "File" "${packagesFilesDatabase}")
 
 		# package file to download
 		local packageFile="$packageName-$packageVersion-$packageRelease-$packageDistribution-$packageArchitecture${PKGEXT}"
@@ -1428,23 +1452,23 @@ pkginfo_xml() {
 	for prov in "${provides[@]}"; do
 		# replace symbols to avoid conflict with xml tags symbol
 		local prov_filtered=`echo ${prov} | sed -e 's|<=| \&#8804;|g' | sed -e 's|>=| \&#8805;|g' | sed -e 's|&|\&#38;|g' | sed -e 's|+|\&#43;|g' | sed -e 's|<|\&#60;|g' | sed -e 's|>|\&#62;|g'`
-        echo "    <Provides>${prov_filtered}</Provides>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+        echo "    <Provide>${prov_filtered}</Provide>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     done
 	for conf in "${conflicts[@]}"; do
 		local conf_filtered=`echo ${conf} | sed -e 's|<=| \&#8804;|g' | sed -e 's|>=| \&#8805;|g' | sed -e 's|&|\&#38;|g' | sed -e 's|+|\&#43;|g' | sed -e 's|<|\&#60;|g' | sed -e 's|>|\&#62;|g'`
-        echo "    <Conflicts>${conf}</Conflicts>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+        echo "    <Conflict>${conf}</Conflict>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     done
     
     
     for group in "${groups[@]}"; do
-        echo "    <Groups>${group}</Groups>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+        echo "    <Group>${group}</Group>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     done
     for rep in "${repo[@]}"; do
         echo "    <Repository>${rep}</Repository>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     done
     for dep in "${depends[@]}"; do
 		local dep_filtered=`echo ${dep} | sed -e 's|<=| \&#8804;|g' | sed -e 's|>=| \&#8805;|g' | sed -e 's|&|\&#38;|g' | sed -e 's|+|\&#43;|g' | sed -e 's|<|\&#60;|g' | sed -e 's|>|\&#62;|g'`
-        echo "    <Dependancies>${dep_filtered}</Dependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"	
+        echo "    <Dependancy>${dep_filtered}</Dependancy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"	
     done
 	# check if variable has value then add xml tag with values, 
 	# otherwise do not omit this tag anyway even its empty
@@ -1458,15 +1482,15 @@ pkginfo_xml() {
 	# fi
     for optdep in "${optdepends[@]}"; do
         local optdep_filtered=`echo ${optdep} | sed -e 's|<=| \&#8804;|g' | sed -e 's|>=| \&#8805;|g' | sed -e 's|&|\&#38;|g' | sed -e 's|+|\&#43;|g' | sed -e 's|<|\&#60;|g' | sed -e 's|>|\&#62;|g'`
-        echo "    <OptionalDependancies>${optdep_filtered}</OptionalDependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+        echo "    <OptionalDependancy>${optdep_filtered}</OptionalDependancy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     done
     for makedep in "${makedepends[@]}"; do
 		local makedep_filtered=`echo ${makedep} | sed -e 's|<=| \&#8804;|g' | sed -e 's|>=| \&#8805;|g' | sed -e 's|&|\&#38;|g' | sed -e 's|+|\&#43;|g' | sed -e 's|<|\&#60;|g' | sed -e 's|>|\&#62;|g'`
-        echo "    <MakeDependancies>${makedep_filtered}</MakeDependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+        echo "    <MakeDependancy>${makedep_filtered}</MakeDependancy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     done
     for checkdep in "${checkdepends[@]}"; do
 		local checkdep_filtered=`echo ${checkdep} | sed -e 's|<=| \&#8804;|g' | sed -e 's|>=| \&#8805;|g' | sed -e 's|&|\&#38;|g' | sed -e 's|+|\&#43;|g' | sed -e 's|<|\&#60;|g' | sed -e 's|>|\&#62;|g'`
-        echo "    <CheckDependancies>${checkdep_filtered}</CheckDependancies>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+        echo "    <CheckDependancy>${checkdep_filtered}</CheckDependancy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     done
     for reqby in "${requiredby[@]}"; do
         echo "    <RequiredBy>$reqby</RequiredBy>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
@@ -1544,7 +1568,7 @@ pkginfo_xml() {
         #message "$(gettext "Total number of files to be inserted are : ${arraylength}")"
 		for file in "${files[@]}";do
 		    # local file_filtered=`echo ${file} | sed -e 's|<=| \&#8804;|g' | sed -e 's|>=| \&#8805;|g' | sed -e 's|&|\&#38;|g' | sed -e 's|+|\&#43;|g' | sed -e 's|<|\&#60;|g' | sed -e 's|>|\&#62;|g'`
-            echo "    <Files>${file}</Files>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
+            echo "    <File>${file}</File>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
         done
 		# echo "  </${_pkgname}>" >> "${pkgdir}/usr/share/avouch/pkginfo/${_pkgname}.xml"
     # End of root
@@ -1928,11 +1952,8 @@ install_pkg(){
 	else
 		error "$(gettext "Root privileges are required. Try sudo!")"
 		exit 1
-	fi
-
-	
+	fi	
 }
-
 
 ########################################################################
 package_build(){
