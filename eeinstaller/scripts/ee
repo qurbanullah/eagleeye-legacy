@@ -13,6 +13,57 @@ EEVER=0.2.1
 # change to english locale!
 export LANG="en_US"
 
+########################################################################
+
+# check if messages are to be printed using color
+unset ALL_OFF BOLD BLUE GREEN RED YELLOW
+
+	if tput setaf 0 &>/dev/null; then
+		ALL_OFF="$(tput sgr0)"
+		BOLD="$(tput bold)"
+		BLUE="${BOLD}$(tput setaf 4)"
+		GREEN="${BOLD}$(tput setaf 2)"
+		RED="${BOLD}$(tput setaf 1)"
+		YELLOW="${BOLD}$(tput setaf 3)"
+	else
+		ALL_OFF="\e[0m"
+		BOLD="\e[1m"
+		BLUE="${BOLD}\e[34m"
+		GREEN="${BOLD}\e[32m"
+		RED="${BOLD}\e[31m"
+		YELLOW="${BOLD}\e[33m"
+	fi
+
+readonly ALL_OFF BOLD BLUE GREEN RED YELLOW
+
+### SUBROUTINES ###
+plain() {
+	local mesg=$1; shift
+	printf "${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
+}
+
+success() {
+	local mesg=$1; shift
+	printf "${GREEN} $(gettext "Success:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
+}
+
+message() {
+	local mesg=$1; shift
+	printf "${BLUE} $(gettext "Message:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
+}
+
+warning() {
+	local mesg=$1; shift
+	printf "${YELLOW} $(gettext "Warning:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
+}
+
+error() {
+	local mesg=$1; shift
+	printf "${RED} $(gettext "Error:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
+}
+
+########################################################################
+
 # echo "Parameters are : $@"
 # keep track of the last executed command
 trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
@@ -28,12 +79,37 @@ if [ ! -d "$cachedir" ]; then
     mkdir -p "$cachedir"
 fi
 
-if [ -f "/etc/ee.conf" ]; then
-	. "/etc/ee.conf"
-else
+
+# if [ -f "/etc/ee.conf" ]; then
+# 	. "/etc/ee.conf"
+# else
+
+# we default to ld.gold
+# check_for_ld_linker=$(/usr/bin/ld --version | grep "GNU ld")
+# if  [[ $(/usr/bin/ld --version | grep "GNU ld") ]]; then
+# 	message "Enabling ld.gold linker"
+# 	rm /usr/bin/ld
+# 	ln -svf ld.gold /usr/bin/ld	
+# fi
+# if $(/usr/bin/ld --version | grep "GNU ld") ; then
+# 	echo "enabling ld.gold"
+# 	enable_ld_gold	
+# fi
+
+
+
+	if [ -f "/etc/ee.conf" ]; then
+		. "/etc/ee.conf"
+	fi
+	
 	# fallback to default
-	AVHVER="avh021"
-	ARCH="x86_64"
+	if [ -z ${AVHVER} ]; then
+		AVHVER="avh030"
+	fi
+	if [ -z ${ARCH} ]; then
+		ARCH="x86_64"
+	fi
+	
 
 	# INFOURL="http://127.0.0.1:8000/api/download-package-info-file"
 	INFOURL="https://avouch.org/api/download-package-info-file"
@@ -85,10 +161,14 @@ else
 	CPPFLAGS="-D_FORTIFY_SOURCE=2"
 
 	# for ld.gold
-	LDFLAGS="-z relro -z now -O2"
-
-	# for ld.bfd
-	# LDFLAGS="-Wl,-O1,--sort-common,--as-needed,-Wl,-z,relro -Wl,-z,now"
+	# check_if_ld_gold_is_default_linker=$(/usr/bin/ld --version | grep "GNU gold")	
+	# if [[ $(/usr/bin/ld --version | grep "GNU gold") ]]; then
+	# 	message "LDFLAGS for ld.gold is enabled"
+	# 	LDFLAGS="-z relro -z now -O2"		
+	# else
+	# 	message "LDFLAGS for ld.bfd is enabled"
+	# 	LDFLAGS="-Wl,-O1,--sort-common,--as-needed,-Wl,-z,relro -Wl,-z,now"		
+	# fi
 
 	# Debugging flags for Avouch
 	DEBUG_CFLAGS="-g -fvar-tracking-assignments"
@@ -146,21 +226,29 @@ else
 	builddir="/build"
 
 	## select the build directory
-	srcbundledir="/${builddir}/${AVHVER}/pkgbuild"
+	# srcbundledir="/${builddir}/${AVHVER}/pkgbuild"
 
 	## select the build directory
-	srcarchivedir="/${builddir}/${AVHVER}/archives"
+	# srcarchivedir="/${builddir}/${AVHVER}/archives"
+
+	## select the build directory
+	srcbundledir="/run/media/avouch/Avouch/Avouch/${AVHVER}/pkgbuild"
+
+	## select the build directory
+	srcarchivedir="/run/media/avouch/Avouch/Avouch/archives"
+
 
 	## Option for package creation
 	mkpkg="yes"
 
 	## Avouch package extension
-	PKGEXT='.avhp.tar.zst'
+	PKGEXT='.avh.tar.zst'
 
 	## package install option
 	install_opt="yes"
 
-fi
+
+# fi
 
 # initialize varable
 srcdir=''
@@ -193,54 +281,7 @@ MAKEFLAGS="${MAKEFLAGS} -j$(nproc)"
 
 
 ########################################################################
-# check if messages are to be printed using color
-unset ALL_OFF BOLD BLUE GREEN RED YELLOW
 
-	if tput setaf 0 &>/dev/null; then
-		ALL_OFF="$(tput sgr0)"
-		BOLD="$(tput bold)"
-		BLUE="${BOLD}$(tput setaf 4)"
-		GREEN="${BOLD}$(tput setaf 2)"
-		RED="${BOLD}$(tput setaf 1)"
-		YELLOW="${BOLD}$(tput setaf 3)"
-	else
-		ALL_OFF="\e[0m"
-		BOLD="\e[1m"
-		BLUE="${BOLD}\e[34m"
-		GREEN="${BOLD}\e[32m"
-		RED="${BOLD}\e[31m"
-		YELLOW="${BOLD}\e[33m"
-	fi
-
-readonly ALL_OFF BOLD BLUE GREEN RED YELLOW
-
-### SUBROUTINES ###
-plain() {
-	local mesg=$1; shift
-	printf "${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
-}
-
-success() {
-	local mesg=$1; shift
-	printf "${GREEN} $(gettext "Success:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
-}
-
-message() {
-	local mesg=$1; shift
-	printf "${BLUE} $(gettext "Message:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
-}
-
-warning() {
-	local mesg=$1; shift
-	printf "${YELLOW} $(gettext "Warning:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
-}
-
-error() {
-	local mesg=$1; shift
-	printf "${RED} $(gettext "Error:")${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
-}
-
-########################################################################
 show_usage() {
     cat <<EOF
 Usage: $program_name [OPTIONS...] <package_name>
@@ -287,6 +328,90 @@ NOTE
 
 EOF
 }
+
+# set variables 
+declare -r TRUE=0
+declare -r FALSE=1
+declare -r PASSWD_FILE=/etc/passwd
+
+########################################################################
+disable_ld_gold(){
+	# message "Using linker ld.bfd instead of ld.gold"
+	# test wether the gold is the default linker
+	# TODO
+	# local test_for_gold_linker=$(/usr/bin/ld --version | grep "GNU gold")
+	if [[ $(/usr/bin/ld --version | grep "GNU gold") ]]; then
+		rm /usr/bin/ld
+		ln -svf ld.bfd /usr/bin/ld
+		message "ld.bfd linker is enabled as default linker"		
+	else
+		message "ld.bfd linker is already enabled as default linker"
+	fi
+	# LDFLAGS="-Wl,-O1,--sort-common,--as-needed,-Wl,-z,relro -Wl,-z,now"
+	LDFLAGS="-z,relro -Wl,-z,now -O2"
+}
+########################################################################
+enable_ld_gold(){
+	# message "Enabling Gold linker"
+	# test wether the ld is the default linker
+	# TODO
+	# local test_for_gold_linker=$(/usr/bin/ld --version | grep "GNU ld")
+	if [[ $(/usr/bin/ld --version | grep "GNU ld") ]]; then
+		message "ld.gold is already enabled as default linker"
+	else
+		rm /usr/bin/ld
+		ln -svf ld.gold /usr/bin/ld
+		message "ld.gold linker is enabled as default linker"
+	fi
+	LDFLAGS="-z relro -z now -O2"
+}
+enable_ld_gold
+##################################################################
+# Purpose: Converts a string to lower case
+# Arguments:
+#   $1 -> String to convert to lower case
+##################################################################
+function to_lower() 
+{
+    local str="$@"
+    local output     
+    output=$(tr '[A-Z]' '[a-z]'<<<"${str}")
+    echo $output
+}
+##################################################################
+# Purpose: Display an error message and die
+# Arguments:
+#   $1 -> Message
+#   $2 -> Exit status (optional)
+##################################################################
+function die() 
+{
+    local m="$1"	# message
+    local e=${2-1}	# default exit status 1
+    echo "$m" 
+    exit $e
+}
+##################################################################
+# Purpose: Return true if script is executed by the root user
+# Arguments: none
+# Return: True or False
+##################################################################
+function is_root() 
+{
+   [ $(id -u) -eq 0 ] && return $TRUE || return $FALSE
+}
+
+##################################################################
+# Purpose: Return true $user exits in /etc/passwd
+# Arguments: $1 (username) -> Username to check in /etc/passwd
+# Return: True or False
+##################################################################
+function is_user_exits() 
+{
+    local u="$1"
+    grep -q "^${u}" $PASSWD_FILE && return $TRUE || return $FALSE
+}
+
 ########################################################################
 # function to exit script when command failed with spsific codes.
 exitOnError() {
@@ -397,32 +522,7 @@ build_tools_exists () {
     fi
 
 }
-########################################################################
-disable_ld_gold(){
-	message "Using linker ld.bfd instead of ld.gold"
-	# test wether the gold is the default linker
-	# TODO
-	local test_for_gold_linker=$(/usr/bin/ld --version | grep "GNU gold")
-	if [ -z "${test_for_gold_linker}" ]; then
-		message "Gold linker is already disabled"
-	else
-		rm /usr/bin/ld
-		ln -svf ld.bfd /usr/bin/ld
-	fi
-}
-########################################################################
-enable_ld_gold(){
-	message "Enabling Gold linker"
-	# test wether the gold is the default linker
-	# TODO
-	local test_for_gold_linker=$(/usr/bin/ld --version | grep "GNU ld")
-	if [ -z "${test_for_gold_linker}" ]; then
-		message "Gold linker is already enabled"
-	else
-		rm /usr/bin/ld
-		ln -svf ld.gold /usr/bin/ld
-	fi
-}
+
 
 ## select the directory to install package
 #pkgdir=`mktemp -d`
@@ -1136,7 +1236,7 @@ removePackage() {
 	if checkIfPackageAlreadyInstalled ${1} ; then
 		# get package info
 		# local packageFiles=$(getPackageFiles ${1} ${installedPackagesFilesDatabase})
-		local packageFiles=$(getXmlElementText "${1}" "Files" "/usr/share/avouch/pkginfo/${1}.xml")
+		local packageFiles=$(getXmlElementText "${1}" "File" "/usr/share/avouch/pkginfo/${1}.xml")
 		if [ -n "${packageFiles}" ]; then
 			message "Attention:"
 			message "This will remove the package ${1} permanently."
@@ -1360,10 +1460,10 @@ function_status(){
 		
 		# Add failed entry to pkgnameandver.log
 		touch "${builddir}/pkgnameandver.log"
-		echo "# This package failed to build" >> "${builddir}/pkgnameandver.log"
+		echo "# ${2} failed to build" >> "${builddir}/pkgnameandver.log"
 		
 		touch "${builddir}/pkgname.log"
-		echo "# This package failed to build" >> "${builddir}/pkgname.log"	
+		echo "# ${2} failed to build" >> "${builddir}/pkgname.log"	
 		exit 1
 	else	
 		success "$(gettext "Build process completed successfully")"	
@@ -1958,7 +2058,8 @@ install_pkg(){
 ########################################################################
 package_build(){
     #echo "recalled : ${1}"
-	
+	local retval=0
+
 	# clear user-specified buildflags if requested
 	if check_option "buildflags" "n"; then
 		unset CPPFLAGS CFLAGS CXXFLAGS LDFLAGS	
@@ -1987,7 +2088,10 @@ package_build(){
 			pushd "${srcdir}"
 				# run function getsrc() from PKGBUILD file		
 				#getsrc 2>&1 | tee -a "${srcdir}/build.log"
-				getsrc	
+				getsrc	|| retval=$?
+				message "$(gettext "Retun value is : ${retval}")"
+				function_status "$retval" ${1}
+				unset $retval	
 			popd
 		else
 			warning "$(gettext "Funtion getsrc() does not exist.")"			
@@ -1998,7 +2102,10 @@ package_build(){
 			pushd "${srcdir}"
 				# run function getsrc() from PKGBUILD file		
 				#pkgver 2>&1 | tee -a "${srcdir}/build.log"
-				pkgver		
+				pkgver	|| retval=$?
+				message "$(gettext "Retun value is : ${retval}")"
+				function_status "$retval" ${1}
+				unset $retval	
 			popd
 		else
 			warning "$(gettext "Funtion pkgver() does not exist.")"			
@@ -2008,14 +2115,17 @@ package_build(){
 			pushd "${srcdir}"
 				# run function prepare() from PKGBUILD file
 				#prepare 2>&1 | tee -a "${srcdir}/build.log"				
-				prepare	
+				prepare	|| retval=$?
+				message "$(gettext "Retun value is : ${retval}")"
+				function_status "$retval" ${1}
+				unset $retval
 			popd
 		else
 			warning "$(gettext "Funtion prepare() does not exist.")"
 		fi
 		
 		
-		local retval=0
+		
 		# check for the build funtion exists or not
 		if ( function_exists 'build' );then
 			pushd "${srcdir}"
@@ -2025,7 +2135,8 @@ package_build(){
 				build || retval=$?
 				#retval=$? # '$?' is the return value of the previous command
 				message "$(gettext "Retun value is : ${retval}")"
-				function_status "$retval"
+				function_status "$retval" ${1}
+				unset $retval
 			popd
 		else			
 			warning "$(gettext "Funtion build() does not exist.")"
@@ -2036,7 +2147,10 @@ package_build(){
 			pushd "${srcdir}"
 				# run function check() from PKGBUILD file
 				#check 2>&1 | tee -a "${srcdir}/build.log"
-				check
+				check || retval=$?
+				message "$(gettext "Retun value is : ${retval}")"
+				function_status "$retval" ${1}
+				unset $retval
 			popd
 		else
 			warning "$(gettext "Funtion check() does not exist.")"
@@ -2054,7 +2168,11 @@ package_build(){
 				clean_pkgdir
 				message "$(gettext "Package is : ${pkgname}")"
 				pushd "${srcdir}"
-					package	
+					package	|| retval=$?
+					message "$(gettext "Retun value is : ${retval}")"
+					function_status "$retval" ${1}
+					unset $retval
+
 					makepkg "${pkgname}"
 				popd	
 
@@ -2064,7 +2182,11 @@ package_build(){
 					clean_pkgdir
 					message "$(gettext "Package is : ${pkg}")"
 					pushd "${srcdir}"	
-						package_"${pkg}"
+						package_"${pkg}" || retval=$?
+						message "$(gettext "Retun value is : ${retval}")"
+						function_status "$retval" ${pkg}
+						unset $retval
+
 						makepkg "${pkg}"
 					popd
 				done
